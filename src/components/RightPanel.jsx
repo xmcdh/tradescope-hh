@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { buildAIPrompt } from '../lib/formatAIPrompt';
 import { formatPrice } from '../lib/indicators';
+import { DATA_FRESH_MS } from '../lib/marketData';
 import { buildSignalText } from '../lib/formatSignal';
 
 function CopyButton({ label, kind = 'ghost', onClick, feedback }) {
@@ -40,6 +41,18 @@ function rsiGauge(rsi) {
 
 function macdBarClass(value) {
   return value >= 0 ? 'bg-[var(--accent-green)]' : 'bg-[var(--accent-red)]';
+}
+
+function freshnessLabel(snapshot) {
+  if (snapshot?.error) {
+    return 'failed';
+  }
+
+  if (!snapshot?.updatedAt) {
+    return 'waiting';
+  }
+
+  return Date.now() - snapshot.updatedAt < DATA_FRESH_MS ? 'fresh' : 'stale';
 }
 
 export default function RightPanel({ open, selectedSymbol, snapshot, history, onClose, onCopyAction }) {
@@ -259,7 +272,9 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
                 <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
                   <div className="uppercase tracking-[0.18em] text-[var(--text-muted)]">Feed</div>
                   <div className="mt-2 font-mono text-[var(--text-primary)]">{snapshot?.exchange ?? '--'}</div>
-                  <div className="text-[var(--text-secondary)]">{snapshot?.mode ?? '--'}</div>
+                  <div className="text-[var(--text-secondary)]">
+                    {(snapshot?.mode ?? '--')} · {freshnessLabel(snapshot)}
+                  </div>
                 </div>
               </div>
 

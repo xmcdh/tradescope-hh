@@ -2,15 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { calculateIndicators } from '../lib/indicators';
 import {
   CANDLE_POLL_MS,
-  fetchCoinGeckoBatchPrices,
-  fetchCoinGeckoMarketSnapshot,
-  getCoinbaseProduct,
-  getCoinGeckoMeta,
+  fetchBinanceBatchPrices,
+  fetchBinanceMarketSnapshot,
+  getSourceLabel,
+  getSourceMode,
   isPairUnavailableError,
   isRateLimitedError,
   PRICE_POLL_MS,
   RATE_LIMIT_BACKOFF_MS,
-  subscribeCoinbaseTicker,
   TIMEFRAME,
 } from '../lib/marketData';
 import { buildSignalSetup } from '../lib/signalLogic';
@@ -33,14 +32,13 @@ function hydrateSnapshot(snapshot) {
 }
 
 function createBaseSnapshot(symbol) {
-  const coinbaseProduct = getCoinbaseProduct(symbol);
   return {
     symbol,
     candles: [],
     latestPrice: null,
     priceChange24h: null,
-    exchange: coinbaseProduct ? 'Coinbase' : 'CoinGecko',
-    mode: coinbaseProduct ? 'stream' : 'polling',
+    exchange: getSourceLabel(),
+    mode: getSourceMode(),
     timeframe: TIMEFRAME,
     updatedAt: null,
     loading: true,
@@ -61,13 +59,12 @@ function mergeSnapshot(current, patch) {
 
 function formatRetryWarning(retryAt, now = Date.now()) {
   const seconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
-  return `Rate limited — retrying in ${seconds}s`;
+  return `Binance rate limited, retrying in ${seconds}s`;
 }
 
 export function useWatchlistMarketData(symbols) {
   const [snapshots, setSnapshots] = useState({});
   const retryAtRef = useRef(0);
-  const wsLiveSymbolsRef = useRef(new Set());
 
   useEffect(() => {
     setSnapshots((current) => {
@@ -81,7 +78,6 @@ export function useWatchlistMarketData(symbols) {
 
   useEffect(() => {
     let cancelled = false;
-    let coinbaseSocket = null;
     let priceIntervalId = null;
     let candleIntervalId = null;
     let warningIntervalId = null;
@@ -91,7 +87,7 @@ export function useWatchlistMarketData(symbols) {
     async function syncCandles() {
       const results = await Promise.allSettled(
         normalizedSymbols.map(async (symbol) => {
-          const snapshot = await fetchCoinGeckoMarketSnapshot(symbol);
+          const snapshot = await fetchBinanceMarketSnapshot(symbol);
           return { symbol, snapshot };
         }),
       );
@@ -106,14 +102,13 @@ export function useWatchlistMarketData(symbols) {
         results.forEach((result, index) => {
           if (result.status === 'fulfilled') {
             const { symbol, snapshot } = result.value;
-            const hasWsPrice = wsLiveSymbolsRef.current.has(symbol);
             next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol), {
               candles: snapshot.candles,
-              latestPrice: hasWsPrice ? current[symbol]?.latestPrice ?? snapshot.latestPrice : snapshot.latestPrice,
+              latestPrice: snapshot.latestPrice,
               priceChange24h: snapshot.change24h,
-              exchange: hasWsPrice ? 'Coinbase' : 'CoinGecko',
-              mode: hasWsPrice ? 'stream' : 'polling',
-              updatedAt: hasWsPrice ? current[symbol]?.updatedAt ?? snapshot.updatedAt : snapshot.updatedAt,
+              exchange: getSourceLabel(),
+              mode: getSourceMode(),
+              updatedAt: current[symbol]?.updatedAt ?? snapshot.updatedAt,
               loading: false,
               error: '',
               warning: current[symbol]?.retryAt ? formatRetryWarning(current[symbol].retryAt) : '',
@@ -134,13 +129,13 @@ export function useWatchlistMarketData(symbols) {
       });
     }
 
-    async function syncCoinGeckoBatchPrices() {
+    async function syncBatchPrices() {
       if (!normalizedSymbols.length || Date.now() < retryAtRef.current) {
         return;
       }
 
       try {
-        const quotes = await fetchCoinGeckoBatchPrices(normalizedSymbols);
+        const quotes = await fetchBinanceBatchPrices(normalizedSymbols);
         if (cancelled) {
           return;
         }
@@ -152,16 +147,14 @@ export function useWatchlistMarketData(symbols) {
           normalizedSymbols.forEach((symbol) => {
             const quote = quotes[symbol];
             const currentSnapshot = current[symbol] ?? createBaseSnapshot(symbol);
-            const hasWsPrice = wsLiveSymbolsRef.current.has(symbol);
 
             next[symbol] = mergeSnapshot(currentSnapshot, {
-              latestPrice: hasWsPrice ? currentSnapshot.latestPrice : quote?.price ?? currentSnapshot.latestPrice,
-              priceChange24h: quote?.change24h ?? currentSnapshot.priceChange24h,
-              exchange: hasWsPrice ? 'Coinbase' : 'CoinGecko',
-              mode: hasWsPrice ? 'stream' : 'polling',
-              updatedAt: hasWsPrice ? currentSnapshot.updatedAt : quote?.updatedAt ?? currentSnapshot.updatedAt,
+              latestPrice: quote?.price ?? currentSnapshot.latestPrice,
+              exchange: getSourceLabel(),
+              mode: getSourceMode(),
+              updatedAt: quote?.updatedAt ?? currentSnapshot.updatedAt,
               loading: false,
-              error: currentSnapshot.error === 'Coinbase websocket connection failed' ? '' : currentSnapshot.error,
+              error: quote ? '' : currentSnapshot.error,
               warning: '',
               retryAt: null,
             });
@@ -204,73 +197,6 @@ export function useWatchlistMarketData(symbols) {
       }
     }
 
-    function startCoinbaseStream() {
-      const streamSymbols = normalizedSymbols.filter((symbol) => Boolean(getCoinbaseProduct(symbol)));
-      if (!streamSymbols.length) {
-        return;
-      }
-
-      coinbaseSocket = subscribeCoinbaseTicker(streamSymbols, {
-        onTicker: ({ symbol, price, updatedAt, change24h }) => {
-          if (cancelled) {
-            return;
-          }
-
-          wsLiveSymbolsRef.current.add(symbol);
-          setSnapshots((current) => ({
-            ...current,
-            [symbol]: mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol), {
-              latestPrice: price,
-              priceChange24h: change24h ?? current[symbol]?.priceChange24h,
-              exchange: 'Coinbase',
-              mode: 'stream',
-              updatedAt,
-              loading: false,
-              error: '',
-            }),
-          }));
-        },
-        onError: (error) => {
-          if (cancelled) {
-            return;
-          }
-
-          wsLiveSymbolsRef.current = new Set();
-          setSnapshots((current) => {
-            const next = { ...current };
-            streamSymbols.forEach((symbol) => {
-              next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol), {
-                exchange: 'CoinGecko',
-                mode: 'polling',
-                loading: false,
-                error: '',
-                warning: error.message,
-              });
-            });
-            return next;
-          });
-        },
-        onClose: () => {
-          if (cancelled) {
-            return;
-          }
-
-          wsLiveSymbolsRef.current = new Set();
-          setSnapshots((current) => {
-            const next = { ...current };
-            streamSymbols.forEach((symbol) => {
-              next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol), {
-                exchange: 'CoinGecko',
-                mode: 'polling',
-                loading: false,
-              });
-            });
-            return next;
-          });
-        },
-      });
-    }
-
     async function bootstrap() {
       setSnapshots((current) => {
         const next = { ...current };
@@ -287,10 +213,9 @@ export function useWatchlistMarketData(symbols) {
       });
 
       await syncCandles();
-      await syncCoinGeckoBatchPrices();
-      startCoinbaseStream();
+      await syncBatchPrices();
 
-      priceIntervalId = window.setInterval(syncCoinGeckoBatchPrices, PRICE_POLL_MS);
+      priceIntervalId = window.setInterval(syncBatchPrices, PRICE_POLL_MS);
       candleIntervalId = window.setInterval(syncCandles, CANDLE_POLL_MS);
       warningIntervalId = window.setInterval(() => {
         if (cancelled) {
@@ -323,7 +248,6 @@ export function useWatchlistMarketData(symbols) {
 
     return () => {
       cancelled = true;
-      coinbaseSocket?.close();
       window.clearInterval(priceIntervalId);
       window.clearInterval(candleIntervalId);
       window.clearInterval(warningIntervalId);

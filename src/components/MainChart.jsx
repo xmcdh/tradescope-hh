@@ -51,7 +51,7 @@ export default function MainChart({ symbol, symbols, timeframe, onTimeframeChang
             ))}
           </select>
           <div className="text-[11px] uppercase tracking-[0.22em] text-[var(--text-muted)]">
-            {snapshot?.exchange ?? 'TradingView'} chart embed
+            {snapshot?.exchange ?? 'Binance'} chart embed
           </div>
         </div>
 

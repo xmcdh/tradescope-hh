@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildAIPrompt } from '../lib/formatAIPrompt';
 import { formatPrice } from '../lib/indicators';
+import { DATA_FRESH_MS } from '../lib/marketData';
 import { buildSignalText } from '../lib/formatSignal';
 
 function signalTone(signal) {
@@ -61,10 +62,43 @@ function relativeAge(updatedAt, now) {
   return `${seconds}s ago`;
 }
 
+function freshnessState(updatedAt, error, now) {
+  if (error) {
+    return {
+      dotClass: 'text-[var(--accent-red)]',
+      label: 'Feed failed',
+      detail: 'Check proxy',
+    };
+  }
+
+  if (!updatedAt) {
+    return {
+      dotClass: 'text-[var(--accent-orange)]',
+      label: 'Waiting for price',
+      detail: 'Bootstrapping',
+    };
+  }
+
+  const age = now - updatedAt;
+  if (age < DATA_FRESH_MS) {
+    return {
+      dotClass: 'text-[var(--accent-green)]',
+      label: 'Fresh data',
+      detail: '<15s',
+    };
+  }
+
+  return {
+    dotClass: 'text-[var(--accent-orange)]',
+    label: 'Stale data',
+    detail: '>15s',
+  };
+}
+
 export default function SignalCard({ symbol, snapshot, selected, onSelect, onCopyAction }) {
   const liveIndicators = snapshot?.indicators ?? null;
   const setup = snapshot?.setup ?? null;
-  const exchange = snapshot?.exchange ?? 'CoinGecko';
+  const exchange = snapshot?.exchange ?? 'Binance via Proxy';
   const mode = snapshot?.mode ?? 'polling';
   const timeframe = snapshot?.timeframe ?? '15m';
   const updatedAt = snapshot?.updatedAt ?? null;
@@ -75,6 +109,7 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
   const [flash, setFlash] = useState('');
   const [now, setNow] = useState(Date.now());
   const lastPriceRef = useRef(null);
+  const feedState = freshnessState(updatedAt, error, now);
 
   useEffect(() => {
     const intervalId = window.setInterval(() => setNow(Date.now()), 1000);
@@ -163,7 +198,7 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
             </span>
           </div>
           <div className="mt-1 text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
-            {mode === 'stream' ? 'live websocket' : '~60s delay'}
+            {mode === 'polling' ? '10s price poll / 5m candles' : mode}
           </div>
           <div className="mt-2 font-mono text-right text-lg text-[var(--text-primary)]">{liveIndicators?.price ? formatPrice(liveIndicators.price) : '--'}</div>
         </div>
@@ -232,10 +267,10 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
       <div className="mt-auto pt-3">
         <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
           <span className="inline-flex items-center gap-1.5">
-            <span className={mode === 'stream' ? 'text-[var(--accent-green)]' : 'text-[var(--accent-orange)]'}>●</span>
-            <span>{mode === 'stream' ? 'Websocket live' : 'Polling fallback'}</span>
+            <span className={feedState.dotClass}>●</span>
+            <span>{feedState.label}</span>
           </span>
-          <span>{timeframe}</span>
+          <span>{timeframe} · {feedState.detail}</span>
         </div>
 
         <div className="mt-2 flex items-center justify-between text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">

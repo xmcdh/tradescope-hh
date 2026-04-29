@@ -1,42 +1,32 @@
 export const TIMEFRAME = '15m';
 export const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
-export const PRICE_POLL_MS = 60000;
-export const CANDLE_POLL_MS = 900000;
-export const RATE_LIMIT_BACKOFF_MS = 120000;
+export const PRICE_POLL_MS = 10000;
+export const CANDLE_POLL_MS = 300000;
+export const DATA_FRESH_MS = 15000;
+export const RATE_LIMIT_BACKOFF_MS = 30000;
 
-const COINGECKO_API = '/api/coingecko/api/v3';
-const COINBASE_WS_URL = 'wss://ws-feed.exchange.coinbase.com';
+const PROXY = import.meta.env.DEV ? 'http://localhost:3001' : '';
 const NETWORK_BLOCK_HOST = 'internetsehat.iconpln.net.id';
-const PAIR_UNAVAILABLE = 'Pair not available — add to watchlist manually';
-const RATE_LIMITED = 'CoinGecko rate limit reached';
-
-export const COINGECKO_IDS = {
-  BTCUSDT: { id: 'bitcoin', symbol: 'BTC' },
-  ETHUSDT: { id: 'ethereum', symbol: 'ETH' },
-  SOLUSDT: { id: 'solana', symbol: 'SOL' },
-  BNBUSDT: { id: 'binancecoin', symbol: 'BNB' },
-  ADAUSDT: { id: 'cardano', symbol: 'ADA' },
-  DOTUSDT: { id: 'polkadot', symbol: 'DOT' },
-};
-
-export const COINBASE_PRODUCTS = {
-  BTCUSDT: 'BTC-USD',
-  ETHUSDT: 'ETH-USD',
-  SOLUSDT: 'SOL-USD',
-};
+const PAIR_UNAVAILABLE = 'Pair not available on Binance';
+const RATE_LIMITED = 'Binance rate limit reached';
+const SOURCE_LABEL = 'Binance via Proxy';
+const SOURCE_MODE = 'polling';
 
 export function normalizeSymbol(symbol) {
   return symbol.replace(/[^A-Z0-9]/gi, '').toUpperCase();
 }
 
-export function getCoinGeckoMeta(symbol) {
-  const normalized = normalizeSymbol(symbol);
-  return COINGECKO_IDS[normalized] ?? null;
+export function getSourceLabel() {
+  return SOURCE_LABEL;
 }
 
-export function getCoinbaseProduct(symbol) {
-  const normalized = normalizeSymbol(symbol);
-  return COINBASE_PRODUCTS[normalized] ?? null;
+export function getSourceMode() {
+  return SOURCE_MODE;
+}
+
+function buildProxyUrl(path, params) {
+  const search = new URLSearchParams(params);
+  return `${PROXY}${path}?${search.toString()}`;
 }
 
 async function assertUsableJsonResponse(response, provider) {
@@ -63,7 +53,7 @@ async function assertUsableJsonResponse(response, provider) {
 
 function normalizeFetchError(error, provider) {
   if (error instanceof Error && error.message === 'Failed to fetch') {
-    return new Error(`${provider} request failed. Network policy or TLS trust on this machine is blocking data access.`);
+    return new Error(`${provider} request failed. Network policy or proxy setup is blocking data access.`);
   }
 
   return error;
@@ -71,6 +61,10 @@ function normalizeFetchError(error, provider) {
 
 function createPairUnavailableError() {
   return new Error(PAIR_UNAVAILABLE);
+}
+
+function createRateLimitedError() {
+  return new Error(RATE_LIMITED);
 }
 
 export function isPairUnavailableError(error) {
@@ -81,23 +75,41 @@ export function isRateLimitedError(error) {
   return error instanceof Error && error.message === RATE_LIMITED;
 }
 
-function createRateLimitedError() {
-  return new Error(RATE_LIMITED);
-}
-
-async function fetchCoinGeckoMarketChart(symbol) {
-  const meta = getCoinGeckoMeta(symbol);
-  if (!meta) {
+function ensureKlinesPayload(payload) {
+  if (!Array.isArray(payload) || payload.length === 0) {
     throw createPairUnavailableError();
   }
 
-  const url = `${COINGECKO_API}/coins/${meta.id}/market_chart?vs_currency=usd&days=1`;
+  return payload;
+}
 
+function parseKline(kline) {
+  const [
+    openTime,
+    open,
+    high,
+    low,
+    close,
+    volume,
+  ] = kline;
+
+  return {
+    time: Math.floor(Number(openTime) / 1000),
+    open: Number(open),
+    high: Number(high),
+    low: Number(low),
+    close: Number(close),
+    volume: Number(volume),
+  };
+}
+
+async function fetchBinanceJson(path, params, provider, { allowEmptyArray = false } = {}) {
   try {
-    const response = await fetch(url);
-    await assertUsableJsonResponse(response, 'CoinGecko');
+    const response = await fetch(buildProxyUrl(path, params));
+    await assertUsableJsonResponse(response, provider);
+
     if (!response.ok) {
-      if (response.status === 404) {
+      if (response.status === 404 || response.status === 400) {
         throw createPairUnavailableError();
       }
 
@@ -105,243 +117,142 @@ async function fetchCoinGeckoMarketChart(symbol) {
         throw createRateLimitedError();
       }
 
-      throw new Error(`CoinGecko market chart error ${response.status}`);
+      throw new Error(`${provider} error ${response.status}`);
     }
 
     const payload = await response.json();
-    const prices = payload?.prices;
-    const totalVolumes = payload?.total_volumes;
-    if (!Array.isArray(prices) || prices.length === 0) {
-      throw new Error('CoinGecko returned no market chart payload');
+    if (!allowEmptyArray && Array.isArray(payload) && payload.length === 0) {
+      throw createPairUnavailableError();
     }
 
-    return {
-      prices,
-      totalVolumes: Array.isArray(totalVolumes) ? totalVolumes : [],
-    };
+    if (payload?.code === -1121) {
+      throw createPairUnavailableError();
+    }
+
+    if (payload?.code === -1003) {
+      throw createRateLimitedError();
+    }
+
+    return payload;
   } catch (error) {
-    throw normalizeFetchError(error, 'CoinGecko');
+    throw normalizeFetchError(error, provider);
   }
 }
 
-function buildQuarterHourCandles(prices, totalVolumes) {
-  const buckets = new Map();
+export async function fetchBinanceCandles(symbol, interval = TIMEFRAME, limit = 200) {
+  const normalized = normalizeSymbol(symbol);
+  const payload = await fetchBinanceJson(
+    '/api/binance',
+    {
+      endpoint: 'klines',
+      symbol: normalized,
+      interval,
+      limit: String(limit),
+    },
+    'Binance klines',
+  );
 
-  prices.forEach(([timestamp, price], index) => {
-    const volume = Number(totalVolumes[index]?.[1] ?? 0);
-    const bucket = Math.floor(Number(timestamp) / 900000) * 900000;
-    const currentPrice = Number(price);
-
-    if (!buckets.has(bucket)) {
-      buckets.set(bucket, {
-        time: Math.floor(bucket / 1000),
-        open: currentPrice,
-        high: currentPrice,
-        low: currentPrice,
-        close: currentPrice,
-        volume,
-      });
-      return;
-    }
-
-    const candle = buckets.get(bucket);
-    candle.high = Math.max(candle.high, currentPrice);
-    candle.low = Math.min(candle.low, currentPrice);
-    candle.close = currentPrice;
-    candle.volume = volume;
-  });
-
-  return Array.from(buckets.values()).sort((left, right) => left.time - right.time);
+  return ensureKlinesPayload(payload).map(parseKline);
 }
 
-function calculate24hChange(prices) {
-  if (!Array.isArray(prices) || prices.length < 2) {
-    return null;
+export async function fetchBinance24hr(symbol) {
+  const normalized = normalizeSymbol(symbol);
+  const payload = await fetchBinanceJson(
+    '/api/binance',
+    {
+      endpoint: 'ticker/24hr',
+      symbol: normalized,
+    },
+    'Binance 24hr ticker',
+  );
+
+  const lastPrice = Number(payload?.lastPrice);
+  const change24h = Number(payload?.priceChangePercent);
+
+  if (!Number.isFinite(lastPrice)) {
+    throw new Error('Binance returned invalid 24hr ticker payload');
   }
-
-  const first = Number(prices[0]?.[1]);
-  const last = Number(prices[prices.length - 1]?.[1]);
-  if (!Number.isFinite(first) || !Number.isFinite(last) || first === 0) {
-    return null;
-  }
-
-  return ((last - first) / first) * 100;
-}
-
-export async function fetchCoinGeckoCandles(symbol) {
-  const { prices, totalVolumes } = await fetchCoinGeckoMarketChart(symbol);
-  return buildQuarterHourCandles(prices, totalVolumes);
-}
-
-export async function fetchCoinGeckoMarketSnapshot(symbol) {
-  const { prices, totalVolumes } = await fetchCoinGeckoMarketChart(symbol);
-  const candles = buildQuarterHourCandles(prices, totalVolumes);
-  const latestPrice = Number(prices[prices.length - 1]?.[1] ?? candles[candles.length - 1]?.close ?? null);
 
   return {
-    candles,
-    latestPrice: Number.isFinite(latestPrice) ? latestPrice : null,
-    change24h: calculate24hChange(prices),
+    price: lastPrice,
+    change24h: Number.isFinite(change24h) ? change24h : null,
     updatedAt: Date.now(),
   };
 }
 
-export async function fetchCoinGeckoPrice(symbol) {
-  const meta = getCoinGeckoMeta(symbol);
-  if (!meta) {
-    throw createPairUnavailableError();
+export async function fetchBinancePrice(symbol) {
+  const normalized = normalizeSymbol(symbol);
+  const payload = await fetchBinanceJson(
+    '/api/binance',
+    {
+      endpoint: 'ticker/price',
+      symbol: normalized,
+    },
+    'Binance price ticker',
+  );
+
+  const price = Number(payload?.price);
+  if (!Number.isFinite(price)) {
+    throw new Error('Binance returned invalid price payload');
   }
 
-  const url = `${COINGECKO_API}/simple/price?ids=${meta.id}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true`;
-
-  try {
-    const response = await fetch(url);
-    await assertUsableJsonResponse(response, 'CoinGecko');
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw createPairUnavailableError();
-      }
-
-      if (response.status === 429) {
-        throw createRateLimitedError();
-      }
-
-      throw new Error(`CoinGecko price error ${response.status}`);
-    }
-
-    const payload = await response.json();
-    if (payload?.status?.error_code === 429) {
-      throw createRateLimitedError();
-    }
-
-    const data = payload?.[meta.id];
-    const price = Number(data?.usd);
-    const change24h = Number(data?.usd_24h_change);
-    const lastUpdatedAt = Number(data?.last_updated_at);
-
-    if (!Number.isFinite(price)) {
-      throw new Error('CoinGecko returned invalid price payload');
-    }
-
-    return {
-      price,
-      change24h: Number.isFinite(change24h) ? change24h : null,
-      updatedAt: Number.isFinite(lastUpdatedAt) ? lastUpdatedAt * 1000 : Date.now(),
-      symbol: meta.symbol,
-    };
-  } catch (error) {
-    throw normalizeFetchError(error, 'CoinGecko');
-  }
+  return {
+    price,
+    updatedAt: Date.now(),
+  };
 }
 
-export async function fetchCoinGeckoBatchPrices(symbols) {
-  const metas = symbols
-    .map((symbol) => ({
-      symbol: normalizeSymbol(symbol),
-      meta: getCoinGeckoMeta(symbol),
-    }))
-    .filter((entry) => entry.meta);
-
-  if (!metas.length) {
+export async function fetchBinanceBatchPrices(symbols) {
+  const normalizedSymbols = symbols.map(normalizeSymbol).filter(Boolean);
+  if (!normalizedSymbols.length) {
     return {};
   }
 
-  const ids = [...new Set(metas.map((entry) => entry.meta.id))];
-  const url = `${COINGECKO_API}/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_24hr_change=true&include_last_updated_at=true`;
+  const payload = await fetchBinanceJson(
+    '/api/binance-ws-fallback',
+    {
+      symbols: normalizedSymbols.join(','),
+    },
+    'Binance batch price polling',
+    { allowEmptyArray: true },
+  );
 
-  try {
-    const response = await fetch(url);
-    await assertUsableJsonResponse(response, 'CoinGecko');
-    if (!response.ok) {
-      if (response.status === 429) {
-        throw createRateLimitedError();
-      }
-
-      throw new Error(`CoinGecko batch price error ${response.status}`);
-    }
-
-    const payload = await response.json();
-    if (payload?.status?.error_code === 429) {
-      throw createRateLimitedError();
-    }
-
-    return metas.reduce((accumulator, entry) => {
-      const data = payload?.[entry.meta.id];
-      const price = Number(data?.usd);
-      const change24h = Number(data?.usd_24h_change);
-      const lastUpdatedAt = Number(data?.last_updated_at);
-
-      if (Number.isFinite(price)) {
-        accumulator[entry.symbol] = {
-          price,
-          change24h: Number.isFinite(change24h) ? change24h : null,
-          updatedAt: Number.isFinite(lastUpdatedAt) ? lastUpdatedAt * 1000 : Date.now(),
-        };
-      }
-
-      return accumulator;
-    }, {});
-  } catch (error) {
-    throw normalizeFetchError(error, 'CoinGecko');
+  if (!Array.isArray(payload)) {
+    throw new Error('Binance batch polling returned invalid payload');
   }
+
+  const now = Date.now();
+
+  return payload.reduce((accumulator, item) => {
+    const symbol = normalizeSymbol(item?.symbol ?? '');
+    const price = Number(item?.price);
+
+    if (symbol && Number.isFinite(price)) {
+      accumulator[symbol] = {
+        price,
+        updatedAt: now,
+      };
+    }
+
+    return accumulator;
+  }, {});
 }
 
-export function subscribeCoinbaseTicker(symbols, handlers) {
-  const productIds = symbols.map((symbol) => getCoinbaseProduct(symbol)).filter(Boolean);
-  if (!productIds.length) {
-    return null;
-  }
+export async function fetchBinanceMarketSnapshot(symbol) {
+  const [candles, ticker24h] = await Promise.all([
+    fetchBinanceCandles(symbol, TIMEFRAME, 200),
+    fetchBinance24hr(symbol),
+  ]);
 
-  const socket = new WebSocket(COINBASE_WS_URL);
-
-  socket.onopen = () => {
-    socket.send(
-      JSON.stringify({
-        type: 'subscribe',
-        product_ids: productIds,
-        channels: ['ticker'],
-      }),
-    );
+  return {
+    candles,
+    latestPrice: ticker24h.price ?? candles[candles.length - 1]?.close ?? null,
+    change24h: ticker24h.change24h,
+    updatedAt: ticker24h.updatedAt,
   };
-
-  socket.onmessage = (event) => {
-    try {
-      const payload = JSON.parse(event.data);
-      if (payload?.type !== 'ticker' || !payload?.product_id) {
-        return;
-      }
-
-      const symbol = Object.entries(COINBASE_PRODUCTS).find(([, product]) => product === payload.product_id)?.[0];
-      const price = Number(payload.price);
-      const open24h = Number(payload.open_24h);
-
-      if (!symbol || !Number.isFinite(price)) {
-        return;
-      }
-
-      handlers?.onTicker?.({
-        symbol,
-        price,
-        updatedAt: Date.now(),
-        change24h: Number.isFinite(open24h) && open24h !== 0 ? ((price - open24h) / open24h) * 100 : null,
-      });
-    } catch (error) {
-      handlers?.onError?.(error);
-    }
-  };
-
-  socket.onerror = () => {
-    handlers?.onError?.(new Error('Coinbase websocket connection failed'));
-  };
-
-  socket.onclose = () => {
-    handlers?.onClose?.();
-  };
-
-  return socket;
 }
 
 export function buildTradingViewSymbol(symbol) {
   const normalized = normalizeSymbol(symbol);
-  return `BYBIT:${normalized}`;
+  return `BINANCE:${normalized}`;
 }

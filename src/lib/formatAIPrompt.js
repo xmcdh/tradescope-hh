@@ -64,7 +64,7 @@ export function buildAIPrompt({ symbol, exchange, timeframe, indicators, setup, 
   return [
     'Analisis setup trading crypto futures berikut dan beri pendapatmu:',
     '',
-    `Pair: ${symbol}/USDT (${exchange} ${mode === 'polling' ? 'Polling' : 'Real-time'})`,
+    `Pair: ${symbol}/USDT (${exchange} ${mode === 'polling' ? 'Polling 10s via proxy' : mode})`,
     `Timeframe: ${timeframe}`,
     `Harga sekarang: ${formatPrice(indicators.price)}`,
     '',

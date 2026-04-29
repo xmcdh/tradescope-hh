@@ -169,8 +169,8 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
             <div className="mt-4">
               <IndicatorRail
                 label="Confidence"
-                value={`${snapshot?.setup?.score ?? 0}/3`}
-                width={`${((snapshot?.setup?.score ?? 0) / 3) * 100}%`}
+                value={`${snapshot?.setup?.score ?? 0}/${snapshot?.setup?.scoreMax ?? 10}`}
+                width={`${((snapshot?.setup?.score ?? 0) / (snapshot?.setup?.scoreMax ?? 10)) * 100}%`}
                 color={
                   snapshot?.setup?.signal === 'LONG'
                     ? '#00e676'
@@ -209,6 +209,11 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
             </div>
 
             <div className="mt-4 grid gap-2">
+              {snapshot?.setup?.hardBlock ? (
+                <div className="rounded-2xl border border-[var(--accent-red)]/20 bg-[var(--accent-red)]/10 px-3 py-3 text-xs text-[var(--accent-red)]">
+                  {snapshot.setup.hardBlock}
+                </div>
+              ) : null}
               <CopyButton label="Copy Signal" kind="primary" onClick={copySignal} feedback={feedback === 'Signal copied' ? 'Copied!' : ''} />
               <CopyButton label="Copy AI Prompt" onClick={copyPrompt} feedback={feedback === 'Prompt copied' ? 'Copied!' : ''} />
             </div>

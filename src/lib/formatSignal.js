@@ -10,6 +10,10 @@ export function signalTone(signal) {
     return 'SHORT';
   }
 
+  if (signal === 'NO_TRADE') {
+    return 'NO TRADE';
+  }
+
   return 'WAIT';
 }
 
@@ -32,7 +36,8 @@ export function buildSignalText({ symbol, indicators, setup }) {
     '',
     `Pair: ${symbol}/USDT`,
     `Type: ${signalTone(finalSetup.signal)} | Leverage: 20X`,
-    `Confidence: ${meta.emoji} ${meta.label} (${finalSetup.score}/3)`,
+    `Confidence: ${meta.emoji} ${meta.label} (${finalSetup.score}/${finalSetup.scoreMax ?? 10})`,
+    `Hard Block: ${finalSetup.hardBlock ?? 'None'}`,
     '',
     '📍 ENTRY ZONE:',
     `1) ${formatPrice(finalSetup.entry1)}`,

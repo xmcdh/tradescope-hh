@@ -13,14 +13,18 @@ function signalTone(signal) {
     return 'border-[var(--accent-red)]/30 bg-[var(--accent-red)]/12 text-[var(--accent-red)]';
   }
 
+  if (signal === 'NO_TRADE') {
+    return 'border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]';
+  }
+
   return 'border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/10 text-[var(--accent-yellow)]';
 }
 
 function confidenceDots(score) {
-  return [0, 1, 2].map((index) => (
+  return [0, 1, 2, 3, 4].map((index) => (
     <span
       key={index}
-      className={`h-2 w-2 rounded-full ${index < score ? 'bg-[var(--accent-green)]' : 'bg-[var(--border)]'}`}
+      className={`h-2 w-2 rounded-full ${index < Math.ceil(score / 2) ? 'bg-[var(--accent-green)]' : 'bg-[var(--border)]'}`}
     />
   ));
 }
@@ -206,12 +210,14 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
         <div className="flex flex-col items-end gap-2">
           <span
             className={`rounded-full border px-3 py-1 text-[10px] font-medium uppercase tracking-[0.22em] ${signalTone(setup?.signal)} ${
-              setup?.score === 3 ? 'signal-pulse' : ''
+              setup?.score >= 8 && ['LONG', 'SHORT'].includes(setup?.signal) ? 'signal-pulse' : ''
             }`}
           >
             {setup?.signal ?? 'WAIT'}
           </span>
-          <div className="flex items-center gap-1">{confidenceDots(setup?.score ?? 0)}</div>
+          <div className="flex items-center gap-1" title={`${setup?.score ?? 0}/${setup?.scoreMax ?? 10}`}>
+            {confidenceDots(setup?.score ?? 0)}
+          </div>
         </div>
       </div>
 
@@ -280,6 +286,7 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
       </div>
 
       {loading ? <div className="mt-3 text-xs text-[var(--text-muted)]">Loading market data...</div> : null}
+      {setup?.hardBlock ? <div className="mt-2 text-xs text-[var(--accent-red)]">{setup.hardBlock}</div> : null}
       {warning ? <div className="mt-2 text-xs text-[var(--accent-yellow)]">{warning}</div> : null}
       {error ? <div className="mt-2 text-xs text-[var(--accent-yellow)]">{error}</div> : null}
     </button>

@@ -146,6 +146,7 @@ export function calculateIndicators(candles) {
     resistance,
     latestHigh: highs[highs.length - 1] ?? null,
     latestLow: lows[lows.length - 1] ?? null,
+    lastCandle,
     change24h: calculateChangePercent(candles),
   };
 }

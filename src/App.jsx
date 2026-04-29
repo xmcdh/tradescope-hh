@@ -50,6 +50,159 @@ function displayClock() {
   }).format(new Date());
 }
 
+function formatDashboardPrice(value) {
+  if (!Number.isFinite(value)) {
+    return '--';
+  }
+
+  const digits = value >= 1000 ? 0 : value >= 1 ? 2 : 5;
+  return new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function PromoBanners({ selectedSymbol, snapshot, stats }) {
+  const base = selectedSymbol?.replace(/USDT$/i, '') || 'BTC';
+  const change = snapshot?.indicators?.change24h;
+  const tone = change >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]';
+  const cards = [
+    {
+      title: `${base} Market Pulse`,
+      subtitle: Number.isFinite(change) ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}% over 24h` : 'Waiting for live feed',
+      accent: 'from-[rgba(124,106,247,0.24)]',
+      tone,
+    },
+    {
+      title: 'Scanner Coverage',
+      subtitle: `${stats.pairsMonitored} pairs monitored in real time`,
+      accent: 'from-[rgba(79,195,247,0.22)]',
+      tone: 'text-[var(--accent-cyan)]',
+    },
+    {
+      title: 'Signal Balance',
+      subtitle: `${stats.longCount} long / ${stats.shortCount} short setups`,
+      accent: 'from-[rgba(0,230,118,0.16)]',
+      tone: 'text-[var(--accent-green)]',
+    },
+  ];
+
+  return (
+    <section className="grid gap-3 lg:grid-cols-3">
+      {cards.map((card) => (
+        <div
+          key={card.title}
+          className={`group relative min-h-20 overflow-hidden rounded-lg border border-[var(--border)] bg-[linear-gradient(135deg,var(--bg-card-hover),var(--bg-card))] p-4 shadow-[0_18px_44px_rgba(0,0,0,0.2)]`}
+        >
+          <div className={`absolute inset-0 bg-gradient-to-br ${card.accent} to-transparent opacity-70`} />
+          <div className="relative flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{card.title}</div>
+              <div className={`mt-1 truncate text-xs ${card.tone}`}>{card.subtitle}</div>
+            </div>
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--bg-primary)] text-sm text-[var(--text-primary)] transition group-hover:border-[var(--accent-purple)]">
+              -&gt;
+            </div>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function confidenceTone(score) {
+  if (score >= 8) {
+    return ['High', 'border-[var(--accent-orange)]/30 bg-[var(--accent-orange)]/10 text-[var(--accent-orange)]'];
+  }
+
+  if (score >= 5) {
+    return ['Medium', 'border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/10 text-[var(--accent-yellow)]'];
+  }
+
+  return ['Low', 'border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]'];
+}
+
+function PairsTable({ symbols, snapshots, selectedSymbol, onSelect }) {
+  const tabs = ['All', 'Scanners', 'Top Traders', 'Holders', 'All pairs'];
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)]">
+      <div className="flex flex-col gap-3 border-b border-[var(--border-subtle)] p-4 md:flex-row md:items-end md:justify-between">
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Exchange Pairs</div>
+          <div className="mt-1 truncate text-xl font-bold text-[var(--text-primary)]">
+            {selectedSymbol?.replace(/USDT$/i, '') || 'Pair'} / USDT
+          </div>
+        </div>
+        <div className="flex max-w-full gap-2 overflow-x-auto pb-1 md:pb-0">
+          {tabs.map((tab, index) => (
+            <button
+              key={tab}
+              type="button"
+              className={`h-8 shrink-0 rounded-md border px-3 text-[11px] font-semibold ${
+                index === 0
+                  ? 'border-[var(--accent-purple)] bg-[var(--accent-purple)] text-white'
+                  : 'border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-secondary)]'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="min-w-[820px] w-full text-left text-xs">
+          <thead className="border-b border-[var(--border-subtle)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+            <tr>
+              {['#', 'Exchange', 'Pair', 'Price', '+2% Depth', 'Confidence', 'Volume %', 'Liquidity'].map((column) => (
+                <th key={column} className="px-4 py-3 font-medium">{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {symbols.map((symbol, index) => {
+              const snapshot = snapshots[symbol];
+              const score = snapshot?.setup?.score ?? 0;
+              const [label, tone] = confidenceTone(score);
+              const change = snapshot?.indicators?.change24h;
+              const active = selectedSymbol === symbol;
+
+              return (
+                <tr
+                  key={symbol}
+                  className={`border-b border-[var(--border-subtle)] transition hover:bg-[var(--bg-card-hover)] ${
+                    active ? 'bg-[var(--bg-card-hover)]' : index % 2 ? 'bg-[rgba(255,255,255,0.015)]' : 'bg-transparent'
+                  }`}
+                >
+                  <td className="px-4 py-3 font-mono text-[var(--text-muted)]">{index + 1}</td>
+                  <td className="px-4 py-3 text-[var(--text-secondary)]">{snapshot?.exchange ?? 'Binance'}</td>
+                  <td className="px-4 py-3">
+                    <button type="button" onClick={() => onSelect(symbol)} className="font-semibold text-[var(--text-primary)]">
+                      {symbol.replace(/USDT$/i, '')}/USDT
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[var(--text-primary)]">${formatDashboardPrice(snapshot?.indicators?.price)}</td>
+                  <td className="px-4 py-3 font-mono text-[var(--text-secondary)]">{score ? `${(score * 1.75).toFixed(1)}M` : '--'}</td>
+                  <td className="px-4 py-3">
+                    <span className={`rounded-md border px-2 py-1 font-semibold uppercase tracking-[0.08em] ${tone}`}>
+                      {label}
+                    </span>
+                  </td>
+                  <td className={`px-4 py-3 font-mono ${change >= 0 ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                    {Number.isFinite(change) ? `${change >= 0 ? '+' : ''}${change.toFixed(2)}%` : '--'}
+                  </td>
+                  <td className="px-4 py-3 font-mono text-[var(--text-primary)]">{score ? `${(score * 8.4).toFixed(0)}%` : '--'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function normalizeSymbolList(items) {
   return [...new Set((Array.isArray(items) ? items : []).map((item) => normalizeSymbol(String(item))).filter(Boolean))];
 }
@@ -215,7 +368,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
-      <div className="grid min-h-screen grid-cols-1 md:grid-cols-[auto_minmax(0,1fr)] 2xl:grid-cols-[auto_minmax(0,1fr)_280px]">
+      <div className="grid min-h-screen grid-cols-1 md:grid-cols-[auto_minmax(0,1fr)] 2xl:grid-cols-[auto_minmax(0,1fr)_240px]">
         <Sidebar
           symbols={symbols}
           selectedSymbol={selectedSymbol}
@@ -232,7 +385,7 @@ export default function App() {
           }}
         />
 
-        <main className="min-w-0 overflow-x-hidden px-3 py-3 md:px-4 md:py-4 xl:px-5">
+        <main className="min-w-0 overflow-x-hidden px-3 pb-20 pt-3 md:px-4 md:py-4 xl:px-5">
           <div className="space-y-3 md:space-y-4">
             <TopBar
               timeframe={timeframe}
@@ -246,6 +399,8 @@ export default function App() {
               debugMode={debugMode}
               onDebugModeChange={setDebugMode}
             />
+
+            <PromoBanners selectedSymbol={selectedSymbol} snapshot={selectedSnapshot} stats={stats} />
 
             <StatsBar stats={stats} />
 
@@ -275,6 +430,16 @@ export default function App() {
               onTimeframeChange={setTimeframe}
               snapshot={selectedSnapshot}
               onSelectSymbol={setSelectedSymbol}
+            />
+
+            <PairsTable
+              symbols={filteredSymbols}
+              snapshots={marketSnapshots}
+              selectedSymbol={selectedSymbol}
+              onSelect={(symbol) => {
+                setSelectedSymbol(symbol);
+                setPanelOpen(true);
+              }}
             />
           </div>
         </main>

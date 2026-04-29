@@ -9,10 +9,10 @@ function CopyButton({ label, kind = 'ghost', onClick, feedback }) {
     <button
       type="button"
       onClick={onClick}
-      className={`flex w-full items-center justify-center rounded-2xl px-4 py-3 text-sm font-medium transition ${
+      className={`flex w-full items-center justify-center rounded-md px-4 py-3 text-sm font-semibold transition ${
         kind === 'primary'
-          ? 'bg-[var(--accent-green)] text-[var(--bg-primary)] hover:brightness-110'
-          : 'border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:border-[var(--accent-blue)]'
+          ? 'bg-[var(--accent-purple)] text-white hover:brightness-110'
+          : 'border border-[var(--border)] bg-[var(--bg-primary)] text-[var(--text-primary)] hover:border-[var(--accent-purple)]'
       }`}
     >
       {feedback || label}
@@ -168,27 +168,69 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
   return (
     <>
       <div
-        className={`right-panel fixed inset-y-0 right-0 z-40 w-[min(100vw,360px)] overflow-y-auto overflow-x-hidden border-l border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_24px_48px_rgba(0,0,0,0.45)] transition-all duration-200 md:p-4 2xl:relative 2xl:inset-auto 2xl:z-0 2xl:h-screen 2xl:w-[280px] 2xl:translate-x-0 2xl:opacity-100 2xl:shadow-none ${panelClass}`}
+        className={`right-panel fixed inset-y-0 right-0 z-40 w-[min(100vw,360px)] overflow-y-auto overflow-x-hidden border-l border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_24px_48px_rgba(0,0,0,0.45)] transition-all duration-200 md:p-4 2xl:relative 2xl:inset-auto 2xl:z-0 2xl:h-screen 2xl:w-[240px] 2xl:translate-x-0 2xl:opacity-100 2xl:shadow-none ${panelClass}`}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] md:text-[11px] md:tracking-[0.24em]">Selected Signal</div>
-            <div className="mt-1 font-medium text-[var(--text-primary)]">{selectedSymbol?.replace(/USDT$/i, '') || 'No pair'}/USDT</div>
+        <div className="mb-4 flex items-start justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,var(--accent-purple),var(--accent-cyan))] text-xs font-bold text-white">
+                {selectedSymbol?.slice(0, 2) || 'TS'}
+              </div>
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-[var(--text-primary)]">{selectedSymbol?.replace(/USDT$/i, '') || 'No pair'}</div>
+                <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">USDT perpetual</div>
+              </div>
+            </div>
+            <div className="mt-3 flex items-center gap-2 text-[10px] text-[var(--text-secondary)]">
+              <span className="rounded-md border border-[var(--border)] px-2 py-1">cmc</span>
+              <span className="rounded-md border border-[var(--border)] px-2 py-1">cg</span>
+              <span className="rounded-md border border-[var(--border)] px-2 py-1">x</span>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)] 2xl:hidden"
+            className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--text-secondary)] 2xl:hidden"
           >
             Close
           </button>
         </div>
 
         <div className="space-y-3 pb-8 md:space-y-4">
-          <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] p-3 md:rounded-3xl md:p-4">
+          <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Following</div>
+              <button
+                type="button"
+                className="rounded-md border border-[var(--accent-purple)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-primary)]"
+              >
+                Following
+              </button>
+            </div>
+            <div className="mt-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
+              <div className="text-xs font-semibold text-[var(--text-primary)]">Project announcements</div>
+              <div className="mt-1 text-[11px] leading-4 text-[var(--text-secondary)]">
+                Live signal feed, market regime, and copy history are tracking this pair.
+              </div>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px]">
+              {[
+                ['Like', '12k'],
+                ['Comment', '1.8k'],
+                ['Share', '842'],
+              ].map(([label, value]) => (
+                <div key={label} className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-card)] px-2 py-2">
+                  <div className="font-mono text-[var(--text-primary)]">{value}</div>
+                  <div className="mt-0.5 text-[10px] text-[var(--text-muted)]">{label}</div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-primary)] p-3 md:p-4">
             <div className="flex items-center justify-between">
-              <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-muted)]">Setup</div>
-              <div className="rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[11px] text-[var(--text-primary)]">
+              <div className="text-xs font-medium uppercase tracking-[0.12em] text-[var(--text-muted)]">Setup</div>
+              <div className="rounded-md border border-[var(--border)] px-3 py-1 font-mono text-[11px] text-[var(--text-primary)]">
                 {snapshot?.setup?.signal ?? 'WAIT'}
               </div>
             </div>
@@ -232,7 +274,7 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
               </div>
             </div>
 
-            <div className="mt-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3 md:mt-4">
+            <div className="mt-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3 md:mt-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Entry Context</div>
               <div className="mt-2 font-mono text-xs text-[var(--text-primary)]">{snapshot?.setup?.entryContext ?? '--'}</div>
               <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{snapshot?.setup?.entryAdvice ?? '--'}</div>

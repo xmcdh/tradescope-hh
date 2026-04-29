@@ -100,6 +100,195 @@ export function buildMacdHistogram(candles, points = 10) {
   }));
 }
 
+export function calculateAtr(candles, period = 14) {
+  if (!Array.isArray(candles) || candles.length < period + 1) {
+    return null;
+  }
+
+  const trueRanges = candles.slice(1).map((candle, index) => {
+    const previousClose = candles[index]?.close;
+    const highLow = candle.high - candle.low;
+    const highPreviousClose = Math.abs(candle.high - previousClose);
+    const lowPreviousClose = Math.abs(candle.low - previousClose);
+
+    return Math.max(highLow, highPreviousClose, lowPreviousClose);
+  });
+
+  if (trueRanges.length < period || trueRanges.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  let atr = average(trueRanges.slice(0, period));
+  for (const trueRange of trueRanges.slice(period)) {
+    atr = (atr * (period - 1) + trueRange) / period;
+  }
+
+  return Number.isFinite(atr) ? atr : null;
+}
+
+function emptyMarketStructure(summary = 'Insufficient candles for market structure analysis.') {
+  return {
+    structure: 'NEUTRAL',
+    swingHighs: [],
+    swingLows: [],
+    bos: { detected: false, direction: null, level: null, candlesAgo: null },
+    retest: { detected: false, complete: false, level: null },
+    failedRetest: { detected: false, level: null },
+    structureSummary: summary,
+  };
+}
+
+function withinPercent(value, level, percent) {
+  if (!Number.isFinite(value) || !Number.isFinite(level) || level === 0) {
+    return false;
+  }
+
+  return Math.abs(((value - level) / level) * 100) <= percent;
+}
+
+function isStrictlyRising(values) {
+  return values.length >= 3 && values.every((value, index) => index === 0 || value > values[index - 1]);
+}
+
+function isStrictlyFalling(values) {
+  return values.length >= 3 && values.every((value, index) => index === 0 || value < values[index - 1]);
+}
+
+function detectBos(candles, swingHighPoints, swingLowPoints) {
+  const lastThree = candles.slice(-3);
+  const startIndex = candles.length - lastThree.length;
+
+  for (let index = lastThree.length - 1; index >= 0; index -= 1) {
+    const candle = lastThree[index];
+    const candleIndex = startIndex + index;
+    const candlesAgo = lastThree.length - 1 - index;
+    const previousSwingHigh = swingHighPoints.filter((point) => point.index < candleIndex).at(-1)?.price;
+    const previousSwingLow = swingLowPoints.filter((point) => point.index < candleIndex).at(-1)?.price;
+
+    if (Number.isFinite(previousSwingHigh) && candle.high > previousSwingHigh) {
+      return { detected: true, direction: 'bullish', level: previousSwingHigh, candlesAgo };
+    }
+
+    if (Number.isFinite(previousSwingLow) && candle.low < previousSwingLow) {
+      return { detected: true, direction: 'bearish', level: previousSwingLow, candlesAgo };
+    }
+  }
+
+  return { detected: false, direction: null, level: null, candlesAgo: null };
+}
+
+function detectRetest(candles, bos) {
+  if (!bos.detected || !Number.isFinite(bos.level) || !Number.isInteger(bos.candlesAgo)) {
+    return {
+      retest: { detected: false, complete: false, level: null },
+      failedRetest: { detected: false, level: null },
+    };
+  }
+
+  const breakIndex = candles.length - 1 - bos.candlesAgo;
+  const afterBreak = candles.slice(breakIndex + 1);
+  let touched = false;
+  let complete = false;
+  let failed = false;
+
+  afterBreak.forEach((candle) => {
+    const touchedLevel = candle.low <= bos.level && candle.high >= bos.level;
+    const nearLevel = withinPercent(candle.low, bos.level, 0.5) || withinPercent(candle.high, bos.level, 0.5);
+
+    if (!touchedLevel && !nearLevel) {
+      return;
+    }
+
+    touched = true;
+
+    if (bos.direction === 'bullish') {
+      if (candle.close > bos.level) {
+        complete = true;
+      }
+      if (candle.close < bos.level) {
+        failed = true;
+      }
+      return;
+    }
+
+    if (candle.close < bos.level) {
+      complete = true;
+    }
+    if (candle.close > bos.level) {
+      failed = true;
+    }
+  });
+
+  return {
+    retest: { detected: touched, complete: complete && !failed, level: touched ? bos.level : null },
+    failedRetest: { detected: failed, level: failed ? bos.level : null },
+  };
+}
+
+export function analyzeMarketStructure(candles) {
+  if (!Array.isArray(candles) || candles.length < 5) {
+    return emptyMarketStructure();
+  }
+
+  const swingHighPoints = [];
+  const swingLowPoints = [];
+
+  for (let index = 2; index < candles.length - 2; index += 1) {
+    const candle = candles[index];
+    const isSwingHigh =
+      candle.high > candles[index - 1].high &&
+      candle.high > candles[index - 2].high &&
+      candle.high > candles[index + 1].high &&
+      candle.high > candles[index + 2].high;
+    const isSwingLow =
+      candle.low < candles[index - 1].low &&
+      candle.low < candles[index - 2].low &&
+      candle.low < candles[index + 1].low &&
+      candle.low < candles[index + 2].low;
+
+    if (isSwingHigh) {
+      swingHighPoints.push({ price: candle.high, index });
+    }
+
+    if (isSwingLow) {
+      swingLowPoints.push({ price: candle.low, index });
+    }
+  }
+
+  const lastSwingHighs = swingHighPoints.slice(-5);
+  const lastSwingLows = swingLowPoints.slice(-5);
+  const swingHighs = lastSwingHighs.map((point) => point.price);
+  const swingLows = lastSwingLows.map((point) => point.price);
+  const lastThreeHighs = swingHighs.slice(-3);
+  const lastThreeLows = swingLows.slice(-3);
+  const hasBullishStructure = isStrictlyRising(lastThreeHighs) && isStrictlyRising(lastThreeLows);
+  const hasBearishStructure = isStrictlyFalling(lastThreeHighs) && isStrictlyFalling(lastThreeLows);
+  const structure = hasBullishStructure ? 'BULLISH' : hasBearishStructure ? 'BEARISH' : 'NEUTRAL';
+  const bos = detectBos(candles, swingHighPoints, swingLowPoints);
+  const { retest, failedRetest } = detectRetest(candles, bos);
+  const structureSummary = [
+    `Structure ${structure}.`,
+    swingHighs.length && swingLows.length
+      ? `Last swings: highs ${swingHighs.slice(-3).join(', ')}, lows ${swingLows.slice(-3).join(', ')}.`
+      : 'Not enough swing points for clean HH/HL or LL/LH sequence.',
+    bos.detected ? `${bos.direction} BOS at ${bos.level} (${bos.candlesAgo} candles ago).` : 'No BOS in last 3 candles.',
+    retest.detected ? `Retest ${retest.complete ? 'complete' : 'pending'} at ${retest.level}.` : 'No retest detected.',
+    failedRetest.detected ? `Failed retest at ${failedRetest.level}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return {
+    structure,
+    swingHighs,
+    swingLows,
+    bos,
+    retest,
+    failedRetest,
+    structureSummary,
+  };
+}
+
 export function calculateIndicators(candles, timeframe = '15m') {
   if (!candles || candles.length < 60) {
     return null;
@@ -119,6 +308,8 @@ export function calculateIndicators(candles, timeframe = '15m') {
   const ema200 = ema200Valid ? tailValue(ema200Series.map((item) => item.value)) : null;
 
   const rsi = tailValue(RSI.calculate({ period: 14, values: closes }));
+  const atr = calculateAtr(candles, 14);
+  const marketStructure = analyzeMarketStructure(candles);
   const macdSeries = MACD.calculate({
     values: closes,
     fastPeriod: 12,
@@ -139,7 +330,10 @@ export function calculateIndicators(candles, timeframe = '15m') {
   const previousSupport = Math.min(...previousRecentWindow.map((candle) => candle.low));
   const previousResistance = Math.max(...previousRecentWindow.map((candle) => candle.high));
   const lastCandle = candles[candles.length - 1];
+  const previousCandle = candles[candles.length - 2];
   const price = lastCandle?.close ?? null;
+  const lastCandleRange =
+    Number.isFinite(lastCandle?.high) && Number.isFinite(lastCandle?.low) ? lastCandle.high - lastCandle.low : null;
   const lastUpdate = Number.isFinite(lastCandle?.time) ? lastCandle.time * 1000 : null;
   const stale = Number.isFinite(lastUpdate) ? Date.now() - lastUpdate > timeframeMs(timeframe) * 2 : true;
   const dataStatus = ema200Valid
@@ -161,6 +355,8 @@ export function calculateIndicators(candles, timeframe = '15m') {
     ema50Series,
     ema200Series,
     rsi,
+    atr,
+    marketStructure,
     macd,
     macdSeriesTail: buildMacdHistogram(candles, 10),
     volumeSpike: averageVolume > 0 ? currentVolume > averageVolume * 1.5 : false,
@@ -174,6 +370,9 @@ export function calculateIndicators(candles, timeframe = '15m') {
     latestHigh: highs[highs.length - 1] ?? null,
     latestLow: lows[lows.length - 1] ?? null,
     lastCandle,
+    previousCandle,
+    lastCandleRange,
+    shortPriceChange: calculateChangePercent(candles, 4),
     change24h: calculateChangePercent(candles),
   };
 }

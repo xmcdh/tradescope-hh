@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"node dev-proxy.js\"",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:signal": "node scripts/testSignalLogic.js"
   },
   "dependencies": {
     "lightweight-charts": "^5.0.8",

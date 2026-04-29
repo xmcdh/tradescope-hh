@@ -55,8 +55,31 @@ function freshnessLabel(snapshot) {
   return Date.now() - snapshot.updatedAt < DATA_FRESH_MS ? 'fresh' : 'stale';
 }
 
-export default function RightPanel({ open, selectedSymbol, snapshot, history, onClose, onCopyAction }) {
+function scoreRows(setup) {
+  const items = setup?.scoreBreakdown?.items;
+  if (items?.length) {
+    return items;
+  }
+
+  return [];
+}
+
+function AdjustmentRows({ setup }) {
+  return (setup?.scoreBreakdown?.adjustments ?? []).map((item) => (
+    <div key={item.key} className="flex items-center justify-between gap-2 text-xs">
+      <span className="truncate text-[var(--text-secondary)]" title={item.reason}>{item.label}</span>
+      <span className={`font-mono ${item.points < 0 ? 'text-[var(--accent-red)]' : item.points > 0 ? 'text-[var(--accent-green)]' : 'text-[var(--text-primary)]'}`}>
+        {item.points > 0 ? '+' : ''}{item.points}
+      </span>
+    </div>
+  ));
+}
+
+export default function RightPanel({ open, selectedSymbol, snapshot, history, onClose, onCopyAction, debugMode = false }) {
   const [feedback, setFeedback] = useState('');
+  const executable = ['LONG', 'SHORT'].includes(snapshot?.setup?.signal);
+  const waitLike = ['WAIT', 'WAIT_RETEST'].includes(snapshot?.setup?.signal);
+  const noTrade = ['NO_TRADE', 'AVOID'].includes(snapshot?.setup?.signal);
 
   const metrics = useMemo(() => {
     if (!snapshot?.setup || !snapshot?.indicators) {
@@ -64,9 +87,13 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
     }
 
     const { setup, indicators } = snapshot;
-    const reward = setup.entry1 ? ((setup.tp1 - setup.entry1) / setup.entry1) * 100 : null;
+    const reward = setup.entry1
+      ? setup.signal === 'SHORT'
+        ? ((setup.entry1 - setup.tp1) / setup.entry1) * 100
+        : ((setup.tp1 - setup.entry1) / setup.entry1) * 100
+      : null;
     const risk = setup.entry1 ? (Math.abs(setup.entry1 - setup.sl) / setup.entry1) * 100 : null;
-    const rr = reward && risk ? reward / risk : null;
+    const rr = Number.isFinite(setup.rrRatio) ? setup.rrRatio : reward && risk ? reward / risk : null;
     const supportDistance = indicators.support ? ((indicators.price - indicators.support) / indicators.support) * 100 : null;
     const resistanceDistance = indicators.resistance ? ((indicators.resistance - indicators.price) / indicators.resistance) * 100 : null;
 
@@ -141,11 +168,11 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
   return (
     <>
       <div
-        className={`right-panel fixed inset-y-0 right-0 z-40 w-[320px] overflow-y-auto overflow-x-hidden border-l border-[var(--border)] bg-[var(--bg-card)] p-4 shadow-[0_24px_48px_rgba(0,0,0,0.45)] transition-all duration-200 2xl:relative 2xl:inset-auto 2xl:z-0 2xl:h-screen 2xl:w-[280px] 2xl:translate-x-0 2xl:opacity-100 2xl:shadow-none ${panelClass}`}
+        className={`right-panel fixed inset-y-0 right-0 z-40 w-[min(100vw,360px)] overflow-y-auto overflow-x-hidden border-l border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_24px_48px_rgba(0,0,0,0.45)] transition-all duration-200 md:p-4 2xl:relative 2xl:inset-auto 2xl:z-0 2xl:h-screen 2xl:w-[280px] 2xl:translate-x-0 2xl:opacity-100 2xl:shadow-none ${panelClass}`}
       >
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <div className="text-[11px] uppercase tracking-[0.24em] text-[var(--text-muted)]">Selected Signal</div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] md:text-[11px] md:tracking-[0.24em]">Selected Signal</div>
             <div className="mt-1 font-medium text-[var(--text-primary)]">{selectedSymbol?.replace(/USDT$/i, '') || 'No pair'}/USDT</div>
           </div>
           <button
@@ -157,8 +184,8 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
           </button>
         </div>
 
-        <div className="space-y-4 pb-8">
-          <section className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--bg-primary)] p-4">
+        <div className="space-y-3 pb-8 md:space-y-4">
+          <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] p-3 md:rounded-3xl md:p-4">
             <div className="flex items-center justify-between">
               <div className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-muted)]">Setup</div>
               <div className="rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[11px] text-[var(--text-primary)]">
@@ -182,12 +209,37 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
             </div>
 
             <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
+              <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                <span>Market Regime</span>
+                <span className="font-mono text-[var(--text-primary)]">{snapshot?.setup?.marketRegime ?? '--'}</span>
+              </div>
+              <div className="mt-3 space-y-1.5">
+                {scoreRows(snapshot?.setup).map((item) => (
+                  <div key={item.key} className="flex items-center justify-between gap-2 text-xs">
+                    <span className="truncate text-[var(--text-secondary)]" title={item.reason}>{item.label}</span>
+                    <span className="font-mono text-[var(--text-primary)]">{item.points}/{item.max}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 space-y-1.5 border-t border-[var(--border-subtle)] pt-2">
+                <AdjustmentRows setup={snapshot?.setup} />
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2 border-t border-[var(--border-subtle)] pt-2 text-xs">
+                <span className="uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  Tech {snapshot?.setup?.scoreBreakdown?.technicalTotal ?? 0} + Adj {snapshot?.setup?.scoreBreakdown?.adjustmentTotal ?? 0}
+                </span>
+                <span className="font-mono text-[var(--text-primary)]">{snapshot?.setup?.score ?? 0}/10</span>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3 md:mt-4">
               <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Entry Context</div>
               <div className="mt-2 font-mono text-xs text-[var(--text-primary)]">{snapshot?.setup?.entryContext ?? '--'}</div>
               <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{snapshot?.setup?.entryAdvice ?? '--'}</div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            {executable ? (
+            <div className="mt-3 grid grid-cols-1 gap-2 text-sm min-[390px]:grid-cols-2 md:mt-4 md:gap-3">
               <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Entry</div>
                 <div className="mt-1 font-mono text-right text-[var(--text-primary)]">{formatPrice(snapshot?.setup?.entry1)}</div>
@@ -213,6 +265,33 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
                 </div>
               </div>
             </div>
+            ) : waitLike ? (
+              <div className="mt-3 grid grid-cols-1 gap-2 text-sm md:mt-4 md:gap-3">
+                {[
+                  ['Breakout Level', formatPrice(snapshot?.setup?.watchLevels?.breakoutLevel)],
+                  ['Retest Area', formatPrice(snapshot?.setup?.watchLevels?.retestArea)],
+                  ['Invalidation', formatPrice(snapshot?.setup?.watchLevels?.invalidation)],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">{label}</div>
+                    <div className="mt-1 font-mono text-right text-[var(--text-primary)]">{value}</div>
+                  </div>
+                ))}
+                <div className="rounded-2xl border border-[var(--accent-yellow)]/20 bg-[var(--accent-yellow)]/10 px-3 py-3 text-xs text-[var(--accent-yellow)]">
+                  {snapshot?.setup?.action ?? 'No entry yet.'}
+                </div>
+              </div>
+            ) : noTrade ? (
+              <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3 py-3 text-xs leading-5 text-[var(--text-secondary)]">
+                <div className="font-medium text-[var(--text-primary)]">No entry recommended.</div>
+                <div className="mt-2 space-y-1">
+                  {(snapshot?.setup?.rejectionReasons?.length ? snapshot.setup.rejectionReasons.slice(0, 6) : ['No clear trading edge.']).map((item) => (
+                    <div key={item}>✗ {item}</div>
+                  ))}
+                </div>
+                <div className="mt-2 text-[var(--text-primary)]">{snapshot?.setup?.action ?? 'Wait for stronger confirmation.'}</div>
+              </div>
+            ) : null}
 
             <div className="mt-4 grid gap-2">
               {snapshot?.setup?.hardBlock ? (
@@ -225,19 +304,70 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
                   {snapshot.setup.warnings.join(' ')}
                 </div>
               ) : null}
-              <CopyButton label="Copy Signal" kind="primary" onClick={copySignal} feedback={feedback === 'Signal copied' ? 'Copied!' : ''} />
+              <CopyButton
+                label={noTrade ? 'Copy No-Trade Summary' : waitLike ? 'Copy Wait Summary' : 'Copy Signal'}
+                kind="primary"
+                onClick={copySignal}
+                feedback={feedback === 'Signal copied' ? 'Copied!' : ''}
+              />
               <CopyButton label="Copy AI Prompt" onClick={copyPrompt} feedback={feedback === 'Prompt copied' ? 'Copied!' : ''} />
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--bg-primary)] p-4">
-            <div className="text-[11px] uppercase tracking-[0.24em] text-[var(--text-muted)]">Indicators</div>
+          {import.meta.env.DEV && debugMode ? (
+            <section className="overflow-hidden rounded-2xl border border-[var(--accent-yellow)]/20 bg-[var(--bg-primary)] p-3 md:rounded-3xl md:p-4">
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] md:text-[11px] md:tracking-[0.24em]">Debug</div>
+              <pre className="mt-3 max-h-80 overflow-auto text-[10px] leading-4 text-[var(--text-secondary)]">
+                {JSON.stringify(
+                  {
+                    symbol: selectedSymbol,
+                    source: snapshot?.exchange,
+                    dataFresh: Boolean(snapshot?.updatedAt && Date.now() - snapshot.updatedAt < DATA_FRESH_MS && !snapshot?.error),
+                    stale: Boolean(snapshot?.setup?.stale),
+                    candleCount: snapshot?.candles?.length ?? 0,
+                    timeframe: snapshot?.timeframe,
+                    marketRegime: snapshot?.setup?.marketRegime,
+                    technicalScore: snapshot?.setup?.scoreBreakdown?.technicalTotal,
+                    btcAdjustment: snapshot?.setup?.btcAdjustment,
+                    fundingOiAdjustment: snapshot?.setup?.fundingOiAdjustment,
+                    finalScore: snapshot?.setup?.score,
+                    status: snapshot?.setup?.signal,
+                    hardBlocks: snapshot?.setup?.hardBlock ? [snapshot.setup.hardBlock] : [],
+                    rejectionReasons: snapshot?.setup?.rejectionReasons ?? [],
+                    warningReasons: snapshot?.setup?.warnings ?? [],
+                    ema: {
+                      ema20: snapshot?.indicators?.ema20,
+                      ema50: snapshot?.indicators?.ema50,
+                      ema200: snapshot?.indicators?.ema200,
+                    },
+                    rsi: snapshot?.indicators?.rsi,
+                    macd: snapshot?.indicators?.macd,
+                    volume: {
+                      current: snapshot?.indicators?.currentVolume,
+                      average: snapshot?.indicators?.averageVolume,
+                    },
+                    atr: snapshot?.indicators?.atr,
+                    rrTp1: snapshot?.setup?.rrTp1,
+                    rrTp2: snapshot?.setup?.rrTp2,
+                    fundingRate: snapshot?.setup?.fundingRate,
+                    openInterest: snapshot?.setup?.openInterest,
+                    btcConfirmation: snapshot?.setup?.btcNote,
+                  },
+                  null,
+                  2,
+                )}
+              </pre>
+            </section>
+          ) : null}
+
+          <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] p-3 md:rounded-3xl md:p-4">
+            <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] md:text-[11px] md:tracking-[0.24em]">Indicators</div>
             <div className="mt-4 space-y-4">
               <IndicatorRail label="EMA20" value={formatPrice(snapshot?.indicators?.ema20)} width="100%" color="#448aff" />
               <IndicatorRail label="EMA50" value={formatPrice(snapshot?.indicators?.ema50)} width="78%" color="#ff6d00" />
               <IndicatorRail label="EMA200" value={formatPrice(snapshot?.indicators?.ema200)} width="58%" color="#aa44ff" />
 
-              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3 md:p-4">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">RSI Gauge</div>
                 <div className="mt-4 flex items-center justify-center">
                   <div
@@ -251,7 +381,7 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4">
+              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3 md:p-4">
                 <div className="mb-3 text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">MACD Histogram</div>
                 <div className="flex h-16 items-end gap-1">
                   {(snapshot?.indicators?.macdSeriesTail ?? []).map((bar) => (
@@ -264,7 +394,7 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="grid grid-cols-1 gap-2 text-xs min-[390px]:grid-cols-2 md:gap-3">
                 <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
                   <div className="uppercase tracking-[0.18em] text-[var(--text-muted)]">Volume</div>
                   <div className="mt-2 inline-flex rounded-full border border-[var(--border)] px-3 py-1 font-mono text-[11px] text-[var(--text-primary)]">
@@ -308,9 +438,9 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--bg-primary)] p-4">
+          <section className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] p-3 md:rounded-3xl md:p-4">
             <div className="mb-3 flex items-center justify-between">
-              <div className="text-[11px] uppercase tracking-[0.24em] text-[var(--text-muted)]">Copy History</div>
+              <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)] md:text-[11px] md:tracking-[0.24em]">Copy History</div>
               <div className="text-[11px] text-[var(--text-secondary)]">Last 5</div>
             </div>
 

@@ -32,11 +32,13 @@ html,
 body,
 #root {
   min-height: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 
 body {
   margin: 0;
-  min-width: 1280px;
+  min-width: 0;
   background:
     radial-gradient(circle at top left, rgba(68, 138, 255, 0.08), transparent 24%),
     radial-gradient(circle at bottom right, rgba(0, 230, 118, 0.04), transparent 22%),
@@ -54,6 +56,11 @@ select {
 iframe,
 canvas {
   max-width: 100%;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
 }
 
 .chart-shell {

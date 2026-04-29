@@ -26,7 +26,7 @@ export default function TickerScroll({ items }) {
   const list = items.length ? [...items, ...items] : [];
 
   return (
-    <div className="ticker-mask group relative h-10 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)]">
+    <div className="ticker-mask group relative h-9 max-w-full overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--bg-primary)] md:h-10">
       <div className="ticker-track group-hover:[animation-play-state:paused]">
         {list.length ? (
           list.map((item, index) => (

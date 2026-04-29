@@ -11,14 +11,14 @@ export default function StatsBar({ stats }) {
   ];
 
   return (
-    <section className="grid gap-3 xl:grid-cols-4">
+    <section className="grid grid-cols-2 gap-2 md:gap-3 xl:grid-cols-4">
       {cards.map((card) => (
-        <div key={card.label} className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3">
-          <div className="text-[11px] uppercase tracking-[0.22em] text-[var(--text-muted)]">{card.label}</div>
-          <div className={`mt-2 font-mono text-xl ${typeof card.value === 'number' ? statTone(card.value) : 'text-[var(--text-primary)]'}`}>
+        <div key={card.label} className="min-w-0 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-3 md:px-4">
+          <div className="truncate text-[10px] uppercase tracking-[0.14em] text-[var(--text-muted)] md:text-[11px] md:tracking-[0.22em]">{card.label}</div>
+          <div className={`mt-2 truncate font-mono text-lg md:text-xl ${typeof card.value === 'number' ? statTone(card.value) : 'text-[var(--text-primary)]'}`}>
             {card.value}
           </div>
-          <div className="mt-1 text-xs text-[var(--text-secondary)]">{card.detail}</div>
+          <div className="mt-1 truncate text-[11px] text-[var(--text-secondary)] md:text-xs">{card.detail}</div>
         </div>
       ))}
     </section>

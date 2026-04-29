@@ -181,6 +181,12 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
               />
             </div>
 
+            <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
+              <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Entry Context</div>
+              <div className="mt-2 font-mono text-xs text-[var(--text-primary)]">{snapshot?.setup?.entryContext ?? '--'}</div>
+              <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{snapshot?.setup?.entryAdvice ?? '--'}</div>
+            </div>
+
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
                 <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Entry</div>

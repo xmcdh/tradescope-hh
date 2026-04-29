@@ -120,11 +120,14 @@ export function calculateIndicators(candles) {
   const macd = macdSeries.length ? macdSeries[macdSeries.length - 1] : null;
 
   const recentWindow = candles.slice(-20);
+  const previousRecentWindow = recentWindow.slice(0, -1);
   const recentVolumes = recentWindow.map((candle) => candle.volume);
   const currentVolume = recentVolumes[recentVolumes.length - 1] ?? 0;
   const averageVolume = average(recentVolumes.slice(0, -1));
   const support = Math.min(...recentWindow.map((candle) => candle.low));
   const resistance = Math.max(...recentWindow.map((candle) => candle.high));
+  const previousSupport = Math.min(...previousRecentWindow.map((candle) => candle.low));
+  const previousResistance = Math.max(...previousRecentWindow.map((candle) => candle.high));
   const lastCandle = candles[candles.length - 1];
   const price = lastCandle?.close ?? null;
 
@@ -144,6 +147,9 @@ export function calculateIndicators(candles) {
     averageVolume,
     support,
     resistance,
+    previousSupport,
+    previousResistance,
+    recentCandles: candles.slice(-20),
     latestHigh: highs[highs.length - 1] ?? null,
     latestLow: lows[lows.length - 1] ?? null,
     lastCandle,

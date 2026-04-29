@@ -1,4 +1,11 @@
 const SCORE_MAX = 10;
+const ENTRY_ADVICE = {
+  SAFE_ENTRY: 'Clean pullback setup. Enter at current zone with defined SL.',
+  MOMENTUM_BREAKOUT: 'Breakout confirmed by volume. Entry valid but set tighter SL.',
+  LATE_ENTRY: 'Setup valid but overextended. Wait for RSI to cool or price to pull back to EMA20.',
+  WAIT_RETEST: 'Breakout occurred. Wait for retest of broken level before entering.',
+  CHOPPY_MARKET: 'Market is ranging. No clear edge. Skip this pair today.',
+};
 
 export function confidenceMeta(score) {
   if (score >= 8) {
@@ -22,6 +29,18 @@ function pctDistance(from, to) {
   }
 
   return Math.abs(((from - to) / to) * 100);
+}
+
+function percentMove(from, to) {
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === 0) {
+    return null;
+  }
+
+  return ((to - from) / from) * 100;
+}
+
+function isWithinPercent(value, reference, percent) {
+  return pctDistance(value, reference) <= percent;
 }
 
 function rewardRiskRatio({ direction, entry, support, resistance }) {
@@ -188,6 +207,133 @@ function pickCandidate(longCandidate, shortCandidate) {
   return longCandidate;
 }
 
+function brokeAboveLevel(candle, level) {
+  return Number.isFinite(level) && candle?.open <= level && candle?.close > level;
+}
+
+function brokeBelowLevel(candle, level) {
+  return Number.isFinite(level) && candle?.open >= level && candle?.close < level;
+}
+
+function hasBreakoutWithin(candles, direction, level, lookback) {
+  return candles.slice(-lookback).some((candle) =>
+    direction === 'LONG' ? brokeAboveLevel(candle, level) : brokeBelowLevel(candle, level),
+  );
+}
+
+function hasRetestedLevelAfterBreak(candles, direction, level, lookback) {
+  const window = candles.slice(-lookback);
+  const breakIndex = window.findIndex((candle) =>
+    direction === 'LONG' ? brokeAboveLevel(candle, level) : brokeBelowLevel(candle, level),
+  );
+
+  if (breakIndex === -1) {
+    return false;
+  }
+
+  return window.slice(breakIndex + 1).some((candle) =>
+    direction === 'LONG' ? candle.low <= level && candle.close >= level : candle.high >= level && candle.close <= level,
+  );
+}
+
+export function classifyEntryContext(data) {
+  const {
+    score,
+    direction,
+    price,
+    ema20,
+    rsi,
+    currentVolume,
+    averageVolume,
+    resistance,
+    support,
+    previousResistance,
+    previousSupport,
+    recentCandles = [],
+    trendAligned,
+    notNearResistance,
+    notNearSupport,
+  } = data;
+
+  const candles = recentCandles.filter(Boolean);
+  const lastFive = candles.slice(-5);
+  const lastTwo = candles.slice(-2);
+  const recentHigh = Math.max(...candles.map((candle) => candle.high).filter(Number.isFinite));
+  const recentLow = Math.min(...candles.map((candle) => candle.low).filter(Number.isFinite));
+  const priceVsEma20 = percentMove(ema20, price);
+  const volumeAtLeastAverage = averageVolume > 0 && currentVolume >= averageVolume;
+  const volumeBreakout = averageVolume > 0 && currentVolume >= averageVolume * 1.5;
+  const level = direction === 'SHORT' ? previousSupport ?? support : previousResistance ?? resistance;
+  const brokeWithinTwo = hasBreakoutWithin(lastTwo, direction, level, 2);
+  const brokeWithinFive = hasBreakoutWithin(lastFive, direction, level, 5);
+  const retested = hasRetestedLevelAfterBreak(lastFive, direction, level, 5);
+  const choppy =
+    lastFive.length === 5 &&
+    lastFive.every((candle) => isWithinPercent(candle.close, ema20, 0.8)) &&
+    rsi >= 45 &&
+    rsi <= 55 &&
+    averageVolume > 0 &&
+    currentVolume < averageVolume;
+
+  if (choppy) {
+    return 'CHOPPY_MARKET';
+  }
+
+  if (score >= 6 && brokeWithinFive && !retested) {
+    return 'WAIT_RETEST';
+  }
+
+  if (
+    score >= 8 &&
+    direction === 'LONG' &&
+    brokeWithinTwo &&
+    volumeBreakout &&
+    rsi >= 55 &&
+    rsi <= 70
+  ) {
+    return 'MOMENTUM_BREAKOUT';
+  }
+
+  if (
+    score >= 8 &&
+    direction === 'SHORT' &&
+    brokeWithinTwo &&
+    volumeBreakout &&
+    rsi >= 30 &&
+    rsi <= 45
+  ) {
+    return 'MOMENTUM_BREAKOUT';
+  }
+
+  if (
+    score >= 6 &&
+    score <= 8 &&
+    trendAligned &&
+    Number.isFinite(priceVsEma20) &&
+    ((direction === 'LONG' && rsi >= 65 && priceVsEma20 > 2) ||
+      (direction === 'SHORT' && rsi <= 35 && priceVsEma20 < -2))
+  ) {
+    return 'LATE_ENTRY';
+  }
+
+  const pulledBackFromHigh = Number.isFinite(recentHigh) && percentMove(recentHigh, price) <= -0.5;
+  const bouncedFromLow = Number.isFinite(recentLow) && percentMove(recentLow, price) >= 0.5;
+
+  if (
+    score >= 8 &&
+    trendAligned &&
+    rsi >= 40 &&
+    rsi <= 65 &&
+    volumeAtLeastAverage &&
+    ((direction === 'LONG' && pulledBackFromHigh && notNearResistance) ||
+      (direction === 'SHORT' && bouncedFromLow && notNearSupport))
+  ) {
+    return 'SAFE_ENTRY';
+  }
+
+  return score >= 6 ? 'WAIT_RETEST' : 'CHOPPY_MARKET';
+}
+
 function basisFromCandidate(candidate, rsi, macd) {
   const { checks, breakdown, rr } = candidate;
 
@@ -233,6 +379,24 @@ export function buildSignalSetup(indicators) {
   const shortCandidate = buildCandidate('SHORT', indicators, trendBullish, trendBearish);
   const selected = pickCandidate(longCandidate, shortCandidate);
   const meta = confidenceMeta(selected.total);
+  const entryContext = classifyEntryContext({
+    score: selected.total,
+    direction: selected.direction,
+    price,
+    ema20,
+    rsi,
+    currentVolume: indicators.currentVolume,
+    averageVolume: indicators.averageVolume,
+    resistance: indicators.resistance,
+    support: indicators.support,
+    previousResistance: indicators.previousResistance,
+    previousSupport: indicators.previousSupport,
+    recentCandles: indicators.recentCandles,
+    trendAligned: selected.checks.trendPass,
+    notNearResistance: selected.checks.resistanceDistance > 1.5,
+    notNearSupport: selected.checks.supportDistance > 1.5,
+  });
+  const entryAdvice = ENTRY_ADVICE[entryContext];
 
   return {
     signal: selected.status,
@@ -254,6 +418,8 @@ export function buildSignalSetup(indicators) {
       short: shortCandidate,
     },
     hardBlock: selected.hardBlock,
+    entryContext,
+    entryAdvice,
     rr: round(selected.rr),
     layers: {
       trendBullish,

@@ -218,6 +218,9 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
           <div className="flex items-center gap-1" title={`${setup?.score ?? 0}/${setup?.scoreMax ?? 10}`}>
             {confidenceDots(setup?.score ?? 0)}
           </div>
+          <div className="max-w-[160px] text-right text-[10px] uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+            {setup?.entryContext ?? '--'}
+          </div>
         </div>
       </div>
 
@@ -286,6 +289,7 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
       </div>
 
       {loading ? <div className="mt-3 text-xs text-[var(--text-muted)]">Loading market data...</div> : null}
+      {setup?.entryAdvice ? <div className="mt-2 text-xs text-[var(--text-muted)]">{setup.entryAdvice}</div> : null}
       {setup?.hardBlock ? <div className="mt-2 text-xs text-[var(--accent-red)]">{setup.hardBlock}</div> : null}
       {warning ? <div className="mt-2 text-xs text-[var(--accent-yellow)]">{warning}</div> : null}
       {error ? <div className="mt-2 text-xs text-[var(--accent-yellow)]">{error}</div> : null}

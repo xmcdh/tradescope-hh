@@ -36,6 +36,8 @@ export function buildSignalText({ symbol, indicators, setup }) {
     '',
     `Pair: ${symbol}/USDT`,
     `Type: ${signalTone(finalSetup.signal)} | Leverage: 20X`,
+    `Entry Context: ${finalSetup.entryContext ?? '-'}`,
+    `Entry Advice: ${finalSetup.entryAdvice ?? '-'}`,
     `Confidence: ${meta.emoji} ${meta.label} (${finalSetup.score}/${finalSetup.scoreMax ?? 10})`,
     `Hard Block: ${finalSetup.hardBlock ?? 'None'}`,
     '',

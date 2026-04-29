@@ -1,3 +1,5 @@
+import { fetchBinanceBatchPrices } from '../server/binanceProxy.js';
+
 export default async function handler(req, res) {
   const { symbols } = req.query;
 
@@ -11,20 +13,7 @@ export default async function handler(req, res) {
     .filter(Boolean);
 
   try {
-    const results = await Promise.all(
-      symbolList.map(async (symbol) => {
-        const url = `https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`;
-        const response = await fetch(url, {
-          headers: { 'User-Agent': 'TradeScope/1.0' },
-        });
-
-        if (!response.ok) {
-          return { symbol, error: `HTTP ${response.status}` };
-        }
-
-        return response.json();
-      }),
-    );
+    const results = await fetchBinanceBatchPrices(symbolList);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.json(results);

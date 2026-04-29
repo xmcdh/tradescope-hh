@@ -191,6 +191,24 @@ function buildCandidate(direction, indicators, trendBullish, trendBearish) {
   };
 }
 
+function buildSignalWarnings(indicators) {
+  const warnings = [];
+
+  if (indicators?.valid === false && indicators?.reason === 'insufficient_data') {
+    warnings.push('Insufficient candles for real EMA200. Trend score forced to 0.');
+  }
+
+  if (indicators?.ema200Valid === false) {
+    warnings.push('EMA200 invalid. Waiting for at least 200 candles.');
+  }
+
+  if (indicators?.stale) {
+    warnings.push('Latest candle is stale for the selected timeframe.');
+  }
+
+  return [...new Set(warnings)];
+}
+
 function pickCandidate(longCandidate, shortCandidate) {
   const statusRank = { LONG: 3, SHORT: 3, WAIT: 2, NO_TRADE: 1 };
   const longRank = statusRank[longCandidate.status] ?? 0;
@@ -371,14 +389,16 @@ export function buildSignalSetup(indicators) {
 
   const { price, ema20, ema50, ema200, rsi, macd } = indicators;
 
-  const trendBullish = price > ema20 && ema20 > ema50 && ema50 > ema200;
-  const trendBearish = price < ema20 && ema20 < ema50 && ema50 < ema200;
+  const ema200Valid = indicators.ema200Valid !== false && Number.isFinite(ema200);
+  const trendBullish = ema200Valid && price > ema20 && ema20 > ema50 && ema50 > ema200;
+  const trendBearish = ema200Valid && price < ema20 && ema20 < ema50 && ema50 < ema200;
   const trend = trendBullish ? 'BULLISH' : trendBearish ? 'BEARISH' : 'NEUTRAL';
 
   const longCandidate = buildCandidate('LONG', indicators, trendBullish, trendBearish);
   const shortCandidate = buildCandidate('SHORT', indicators, trendBullish, trendBearish);
   const selected = pickCandidate(longCandidate, shortCandidate);
   const meta = confidenceMeta(selected.total);
+  const warnings = buildSignalWarnings(indicators);
   const entryContext = classifyEntryContext({
     score: selected.total,
     direction: selected.direction,
@@ -412,12 +432,18 @@ export function buildSignalSetup(indicators) {
       breakdown: selected.breakdown,
       status: selected.status,
       hardBlock: selected.hardBlock,
+      warnings,
     },
     candidates: {
       long: longCandidate,
       short: shortCandidate,
     },
     hardBlock: selected.hardBlock,
+    warnings,
+    stale: Boolean(indicators.stale),
+    lastUpdate: indicators.lastUpdate ?? null,
+    dataValid: indicators.valid !== false,
+    invalidReason: indicators.reason ?? null,
     entryContext,
     entryAdvice,
     rr: round(selected.rr),

@@ -290,6 +290,9 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
 
       {loading ? <div className="mt-3 text-xs text-[var(--text-muted)]">Loading market data...</div> : null}
       {setup?.entryAdvice ? <div className="mt-2 text-xs text-[var(--text-muted)]">{setup.entryAdvice}</div> : null}
+      {setup?.warnings?.length ? (
+        <div className="mt-2 text-xs text-[var(--accent-yellow)]">{setup.warnings.join(' ')}</div>
+      ) : null}
       {setup?.hardBlock ? <div className="mt-2 text-xs text-[var(--accent-red)]">{setup.hardBlock}</div> : null}
       {warning ? <div className="mt-2 text-xs text-[var(--accent-yellow)]">{warning}</div> : null}
       {error ? <div className="mt-2 text-xs text-[var(--accent-yellow)]">{error}</div> : null}

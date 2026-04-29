@@ -1,5 +1,13 @@
 import { EMA, MACD, RSI } from 'technicalindicators';
 
+const TIMEFRAME_MS = {
+  '1m': 60 * 1000,
+  '5m': 5 * 60 * 1000,
+  '15m': 15 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
+  '4h': 4 * 60 * 60 * 1000,
+};
+
 export function formatPrice(value) {
   if (!Number.isFinite(value)) {
     return '-';
@@ -37,6 +45,10 @@ function mapAlignedSeries(candles, values, period) {
     time: candles[index + period - 1].time,
     value: Number(value),
   }));
+}
+
+function timeframeMs(timeframe) {
+  return TIMEFRAME_MS[timeframe] ?? TIMEFRAME_MS['15m'];
 }
 
 export function calculateChangePercent(candles, periodsBack = 96) {
@@ -88,7 +100,7 @@ export function buildMacdHistogram(candles, points = 10) {
   }));
 }
 
-export function calculateIndicators(candles) {
+export function calculateIndicators(candles, timeframe = '15m') {
   if (!candles || candles.length < 60) {
     return null;
   }
@@ -99,14 +111,12 @@ export function calculateIndicators(candles) {
 
   const ema20Series = buildEmaLineSeries(candles, 20);
   const ema50Series = buildEmaLineSeries(candles, 50);
-  const ema200Series =
-    candles.length >= 200
-      ? buildEmaLineSeries(candles, 200)
-      : candles.map((candle) => ({ time: candle.time, value: average(closes) }));
+  const ema200Valid = candles.length >= 200;
+  const ema200Series = ema200Valid ? buildEmaLineSeries(candles, 200) : [];
 
   const ema20 = tailValue(ema20Series.map((item) => item.value));
   const ema50 = tailValue(ema50Series.map((item) => item.value));
-  const ema200 = tailValue(ema200Series.map((item) => item.value));
+  const ema200 = ema200Valid ? tailValue(ema200Series.map((item) => item.value)) : null;
 
   const rsi = tailValue(RSI.calculate({ period: 14, values: closes }));
   const macdSeries = MACD.calculate({
@@ -130,8 +140,19 @@ export function calculateIndicators(candles) {
   const previousResistance = Math.max(...previousRecentWindow.map((candle) => candle.high));
   const lastCandle = candles[candles.length - 1];
   const price = lastCandle?.close ?? null;
+  const lastUpdate = Number.isFinite(lastCandle?.time) ? lastCandle.time * 1000 : null;
+  const stale = Number.isFinite(lastUpdate) ? Date.now() - lastUpdate > timeframeMs(timeframe) * 2 : true;
+  const dataStatus = ema200Valid
+    ? { valid: true, reason: null }
+    : { valid: false, reason: 'insufficient_data' };
 
   return {
+    valid: dataStatus.valid,
+    reason: dataStatus.reason,
+    ema200Valid,
+    stale,
+    lastUpdate,
+    timeframe,
     price,
     ema20,
     ema50,

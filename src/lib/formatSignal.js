@@ -40,6 +40,7 @@ export function buildSignalText({ symbol, indicators, setup }) {
     `Entry Advice: ${finalSetup.entryAdvice ?? '-'}`,
     `Confidence: ${meta.emoji} ${meta.label} (${finalSetup.score}/${finalSetup.scoreMax ?? 10})`,
     `Hard Block: ${finalSetup.hardBlock ?? 'None'}`,
+    `Data Warning: ${finalSetup.warnings?.length ? finalSetup.warnings.join('; ') : 'None'}`,
     '',
     '📍 ENTRY ZONE:',
     `1) ${formatPrice(finalSetup.entry1)}`,

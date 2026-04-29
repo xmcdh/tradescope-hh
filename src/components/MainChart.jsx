@@ -1,18 +1,20 @@
-import { buildTradingViewSymbol } from '../lib/marketData';
-
-const timeframeOptions = ['15m', '1h', '4h', '1d'];
+import { TIMEFRAME_OPTIONS, buildTradingViewSymbol } from '../lib/marketData';
 
 function tradingViewInterval(timeframe) {
+  if (timeframe === '1m') {
+    return '1';
+  }
+
+  if (timeframe === '5m') {
+    return '5';
+  }
+
   if (timeframe === '1h') {
     return '60';
   }
 
   if (timeframe === '4h') {
     return '240';
-  }
-
-  if (timeframe === '1d') {
-    return 'D';
   }
 
   return '15';
@@ -56,7 +58,7 @@ export default function MainChart({ symbol, symbols, timeframe, onTimeframeChang
         </div>
 
         <div className="flex items-center gap-2">
-          {timeframeOptions.map((option) => (
+          {TIMEFRAME_OPTIONS.map((option) => (
             <button
               key={option}
               type="button"

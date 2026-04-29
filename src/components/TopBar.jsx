@@ -1,12 +1,11 @@
 import TickerScroll from './TickerScroll';
-
-const timeframeOptions = ['15m', '1h', '4h', '1d'];
+import { TIMEFRAME_OPTIONS } from '../lib/marketData';
 
 export default function TopBar({ timeframe, onTimeframeChange, tickerItems, searchQuery, onSearchQueryChange, onOpenPanel }) {
   return (
     <header className="grid h-12 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] px-3">
       <div className="flex items-center gap-2">
-        {timeframeOptions.map((option) => (
+        {TIMEFRAME_OPTIONS.map((option) => (
           <button
             key={option}
             type="button"

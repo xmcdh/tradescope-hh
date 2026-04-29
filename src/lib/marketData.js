@@ -1,5 +1,6 @@
 export const TIMEFRAME = '15m';
 export const DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+export const CANDLE_LIMIT = 250;
 export const PRICE_POLL_MS = 10000;
 export const CANDLE_POLL_MS = 300000;
 export const DATA_FRESH_MS = 15000;
@@ -11,6 +12,13 @@ const PAIR_UNAVAILABLE = 'Pair not available on Binance';
 const RATE_LIMITED = 'Binance rate limit reached';
 const SOURCE_LABEL = 'Binance via Proxy';
 const SOURCE_MODE = 'polling';
+const BINANCE_INTERVALS = new Set(['1m', '5m', '15m', '1h', '4h']);
+
+export const TIMEFRAME_OPTIONS = ['1m', '5m', '15m', '1h', '4h'];
+
+export function normalizeTimeframe(timeframe) {
+  return BINANCE_INTERVALS.has(timeframe) ? timeframe : TIMEFRAME;
+}
 
 export function normalizeSymbol(symbol) {
   return symbol.replace(/[^A-Z0-9]/gi, '').toUpperCase();
@@ -139,14 +147,15 @@ async function fetchBinanceJson(path, params, provider, { allowEmptyArray = fals
   }
 }
 
-export async function fetchBinanceCandles(symbol, interval = TIMEFRAME, limit = 200) {
+export async function fetchBinanceCandles(symbol, interval = TIMEFRAME, limit = CANDLE_LIMIT) {
   const normalized = normalizeSymbol(symbol);
+  const normalizedInterval = normalizeTimeframe(interval);
   const payload = await fetchBinanceJson(
     '/api/binance',
     {
       endpoint: 'klines',
       symbol: normalized,
-      interval,
+      interval: normalizedInterval,
       limit: String(limit),
     },
     'Binance klines',
@@ -238,14 +247,16 @@ export async function fetchBinanceBatchPrices(symbols) {
   }, {});
 }
 
-export async function fetchBinanceMarketSnapshot(symbol) {
+export async function fetchBinanceMarketSnapshot(symbol, interval = TIMEFRAME) {
+  const normalizedInterval = normalizeTimeframe(interval);
   const [candles, ticker24h] = await Promise.all([
-    fetchBinanceCandles(symbol, TIMEFRAME, 200),
+    fetchBinanceCandles(symbol, normalizedInterval, CANDLE_LIMIT),
     fetchBinance24hr(symbol),
   ]);
 
   return {
     candles,
+    timeframe: normalizedInterval,
     latestPrice: ticker24h.price ?? candles[candles.length - 1]?.close ?? null,
     change24h: ticker24h.change24h,
     updatedAt: ticker24h.updatedAt,

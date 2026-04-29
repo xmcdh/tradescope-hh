@@ -220,6 +220,11 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
                   {snapshot.setup.hardBlock}
                 </div>
               ) : null}
+              {snapshot?.setup?.warnings?.length ? (
+                <div className="rounded-2xl border border-[var(--accent-yellow)]/20 bg-[var(--accent-yellow)]/10 px-3 py-3 text-xs text-[var(--accent-yellow)]">
+                  {snapshot.setup.warnings.join(' ')}
+                </div>
+              ) : null}
               <CopyButton label="Copy Signal" kind="primary" onClick={copySignal} feedback={feedback === 'Signal copied' ? 'Copied!' : ''} />
               <CopyButton label="Copy AI Prompt" onClick={copyPrompt} feedback={feedback === 'Prompt copied' ? 'Copied!' : ''} />
             </div>

@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { calculateIndicators } from '../lib/indicators';
 
-export function useIndicators(candles) {
+export function useIndicators(candles, timeframe = '15m') {
   const [indicators, setIndicators] = useState(null);
 
   useEffect(() => {
-    setIndicators(calculateIndicators(candles));
-  }, [candles]);
+    setIndicators(calculateIndicators(candles, timeframe));
+  }, [candles, timeframe]);
 
   return indicators;
 }

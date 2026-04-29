@@ -11,11 +11,12 @@ import {
   PRICE_POLL_MS,
   RATE_LIMIT_BACKOFF_MS,
   TIMEFRAME,
+  normalizeTimeframe,
 } from '../lib/marketData';
 import { buildSignalSetup } from '../lib/signalLogic';
 
 function hydrateSnapshot(snapshot) {
-  const indicators = calculateIndicators(snapshot.candles ?? []);
+  const indicators = calculateIndicators(snapshot.candles ?? [], snapshot.timeframe);
   const liveIndicators = indicators
     ? {
         ...indicators,
@@ -31,7 +32,7 @@ function hydrateSnapshot(snapshot) {
   };
 }
 
-function createBaseSnapshot(symbol) {
+function createBaseSnapshot(symbol, timeframe = TIMEFRAME) {
   return {
     symbol,
     candles: [],
@@ -39,7 +40,7 @@ function createBaseSnapshot(symbol) {
     priceChange24h: null,
     exchange: getSourceLabel(),
     mode: getSourceMode(),
-    timeframe: TIMEFRAME,
+    timeframe: normalizeTimeframe(timeframe),
     updatedAt: null,
     loading: true,
     error: '',
@@ -62,19 +63,24 @@ function formatRetryWarning(retryAt, now = Date.now()) {
   return `Binance rate limited, retrying in ${seconds}s`;
 }
 
-export function useWatchlistMarketData(symbols) {
+export function useWatchlistMarketData(symbols, timeframe = TIMEFRAME) {
   const [snapshots, setSnapshots] = useState({});
   const retryAtRef = useRef(0);
+  const normalizedTimeframe = normalizeTimeframe(timeframe);
 
   useEffect(() => {
     setSnapshots((current) => {
       const next = {};
       symbols.forEach((symbol) => {
-        next[symbol] = current[symbol] ?? hydrateSnapshot(createBaseSnapshot(symbol));
+        const currentSnapshot = current[symbol];
+        next[symbol] =
+          currentSnapshot?.timeframe === normalizedTimeframe
+            ? currentSnapshot
+            : hydrateSnapshot(createBaseSnapshot(symbol, normalizedTimeframe));
       });
       return next;
     });
-  }, [symbols]);
+  }, [normalizedTimeframe, symbols]);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +93,7 @@ export function useWatchlistMarketData(symbols) {
     async function syncCandles() {
       const results = await Promise.allSettled(
         normalizedSymbols.map(async (symbol) => {
-          const snapshot = await fetchBinanceMarketSnapshot(symbol);
+          const snapshot = await fetchBinanceMarketSnapshot(symbol, normalizedTimeframe);
           return { symbol, snapshot };
         }),
       );
@@ -102,8 +108,9 @@ export function useWatchlistMarketData(symbols) {
         results.forEach((result, index) => {
           if (result.status === 'fulfilled') {
             const { symbol, snapshot } = result.value;
-            next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol), {
+            next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
               candles: snapshot.candles,
+              timeframe: snapshot.timeframe,
               latestPrice: snapshot.latestPrice,
               priceChange24h: snapshot.change24h,
               exchange: getSourceLabel(),
@@ -119,7 +126,7 @@ export function useWatchlistMarketData(symbols) {
 
           const symbol = normalizedSymbols[index];
           const error = result.reason;
-          next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol), {
+          next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
             loading: false,
             error: error.message,
           });
@@ -146,7 +153,7 @@ export function useWatchlistMarketData(symbols) {
 
           normalizedSymbols.forEach((symbol) => {
             const quote = quotes[symbol];
-            const currentSnapshot = current[symbol] ?? createBaseSnapshot(symbol);
+            const currentSnapshot = current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe);
 
             next[symbol] = mergeSnapshot(currentSnapshot, {
               latestPrice: quote?.price ?? currentSnapshot.latestPrice,
@@ -172,7 +179,7 @@ export function useWatchlistMarketData(symbols) {
           setSnapshots((current) => {
             const next = { ...current };
             normalizedSymbols.forEach((symbol) => {
-              next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol), {
+              next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
                 warning: formatRetryWarning(retryAtRef.current),
                 retryAt: retryAtRef.current,
                 loading: false,
@@ -186,7 +193,7 @@ export function useWatchlistMarketData(symbols) {
         setSnapshots((current) => {
           const next = { ...current };
           normalizedSymbols.forEach((symbol) => {
-            const currentSnapshot = current[symbol] ?? createBaseSnapshot(symbol);
+            const currentSnapshot = current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe);
             next[symbol] = mergeSnapshot(currentSnapshot, {
               loading: false,
               error: isPairUnavailableError(error) ? error.message : currentSnapshot.error || error.message,
@@ -202,7 +209,8 @@ export function useWatchlistMarketData(symbols) {
         const next = { ...current };
         normalizedSymbols.forEach((symbol) => {
           next[symbol] = hydrateSnapshot({
-            ...(current[symbol] ?? createBaseSnapshot(symbol)),
+            ...(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe)),
+            timeframe: normalizedTimeframe,
             loading: true,
             error: '',
             warning: '',
@@ -252,7 +260,7 @@ export function useWatchlistMarketData(symbols) {
       window.clearInterval(candleIntervalId);
       window.clearInterval(warningIntervalId);
     };
-  }, [symbols]);
+  }, [normalizedTimeframe, symbols]);
 
   return useMemo(() => snapshots, [snapshots]);
 }

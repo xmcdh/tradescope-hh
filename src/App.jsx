@@ -47,7 +47,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(displayClock());
-  const marketSnapshots = useWatchlistMarketData(symbols);
+  const marketSnapshots = useWatchlistMarketData(symbols, timeframe);
 
   useEffect(() => {
     window.localStorage.setItem(WATCHLIST_KEY, JSON.stringify(symbols));

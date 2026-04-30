@@ -133,12 +133,34 @@ test('report generator markdown includes final verdict and setup section', () =>
       to: '2024-07-01',
       pairs: ['BTC/USDT'],
       timeframes: ['1h'],
+      dataSource: 'vercel-market-data-proxy',
+      fallbackDataSource: 'local-cache',
       successCount: 1,
       failureCount: 0,
       runCount: 1,
     },
     proof: evaluateProfitabilityProof([makeResult()]),
-    results: [makeResult()],
+    results: [
+      {
+        ...makeResult(),
+        metadata: {
+          ...activeStrategy,
+          dataSource: 'vercel-market-data-proxy',
+          candleCount: 260,
+        },
+        integrity: {
+          valid: true,
+          issues: [],
+        },
+      },
+    ],
+    failures: [
+      {
+        pair: 'ETH/USDT',
+        timeframe: '1h',
+        error: 'mock fetch failed',
+      },
+    ],
   };
   const liveGate = {
     ready: false,
@@ -166,6 +188,10 @@ test('report generator markdown includes final verdict and setup section', () =>
 
   assert.equal(verdict, 'NOT READY');
   assert.match(markdown, /Final verdict: \*\*NOT READY\*\*/);
+  assert.match(markdown, /Requested data source: vercel-market-data-proxy/);
+  assert.match(markdown, /Data sources used: vercel-market-data-proxy/);
+  assert.match(markdown, /mock fetch failed/);
+  assert.match(markdown, /BTCUSDT 1h: pass/);
   assert.match(markdown, /\| Pair \| Timeframe \| Proof Status \| Setup Status \|/);
   assert.match(markdown, /Continue paper trading/);
   assert.match(markdown, /## Why Not Ready Yet/);

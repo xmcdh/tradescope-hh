@@ -87,6 +87,9 @@ export function toMarkdown({ sourcePath, summary, liveGate }) {
   const warnings = summary.results
     .filter((item) => (item.backtest?.actionableClosedTradeCount ?? 0) < 50)
     .map((item) => `- ${item.pair} ${item.timeframe}: only ${item.backtest?.actionableClosedTradeCount ?? 0} closed actionable trades`);
+  const failureLines = (summary.failures ?? []).map(
+    (failure) => `- ${failure.pair} ${failure.timeframe}: ${failure.error}`,
+  );
 
   const lines = [
     '# TradeScope Backtest Proof Report',
@@ -102,6 +105,8 @@ export function toMarkdown({ sourcePath, summary, liveGate }) {
     `- Proof status: **${proof.status}**`,
     `- Tested setups: ${summary.results.length}`,
     `- Successes / failures: ${summary.metadata.successCount} / ${summary.metadata.failureCount}`,
+    `- Requested data source: ${summary.metadata.dataSource ?? '--'}`,
+    `- Fallback data source: ${summary.metadata.fallbackDataSource || 'none'}`,
     `- Paper gate passed: ${liveGate?.paperGatePassed ? 'yes' : 'no'}`,
     `- Durable storage: ${liveGate?.storage?.durable ? 'yes' : 'no'}`,
     `- Approved setups: ${setupRegistry.counts.approved}`,
@@ -113,6 +118,7 @@ export function toMarkdown({ sourcePath, summary, liveGate }) {
     `- Timeframes: ${summary.metadata.timeframes.join(', ')}`,
     `- Date range: ${summary.metadata.from} to ${summary.metadata.to}`,
     `- Total candles tested: ${summary.results.reduce((sum, item) => sum + (item.metadata?.candleCount ?? 0), 0)}`,
+    `- Data sources used: ${[...new Set(summary.results.map((item) => item.metadata?.dataSource).filter(Boolean))].join(', ') || 'none'}`,
     '',
     '## Actionable Metrics',
     `- Closed actionable trades: ${proof.overall.closedActionableTrades}`,
@@ -124,6 +130,14 @@ export function toMarkdown({ sourcePath, summary, liveGate }) {
       const validation = item.validation ?? {};
       return `- ${item.pair} ${item.timeframe}: flags=${(validation.flags ?? []).join(', ') || 'none'}, walkForward=${validation.walkForward?.pass ? 'pass' : 'fail'}, OOS degradation=${validation.comparison?.oosDegradation ?? 'n/a'}`;
     }),
+    '',
+    '## Data Fetch Failures',
+    ...(failureLines.length ? failureLines : ['- none']),
+    '',
+    '## Candle Integrity',
+    ...(summary.results.length
+      ? summary.results.map((item) => `- ${item.pair} ${item.timeframe}: ${item.integrity?.valid ? 'pass' : 'fail'}${item.integrity?.issues?.length ? ` (${item.integrity.issues.join(' | ')})` : ''}`)
+      : ['- No valid candle data. Proof is blocked by data fetch failure.']),
     '',
     '## Best / Worst Setup',
     `- Best: ${best ? `${best.pair} ${best.timeframe} | expectancy ${best.backtest?.actionableExpectancy}` : 'n/a'}`,

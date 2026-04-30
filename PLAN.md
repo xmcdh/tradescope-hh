@@ -94,6 +94,8 @@ Official Paper Day 1: PENDING_SETUP_APPROVAL for v1.1 until fresh ATR proof appr
 
 The v1.0 paper phase is archived/superseded. Old records remain historical, but they do not count toward the current ATR proof gate. v1.1 must produce fresh ATR-based backtest, OOS validation, walk-forward validation, setup approval, and official paper proof before any live-readiness verdict can improve. Official v1.1 paper Day 1 starts only after a v1.1 setup is approved for paper trading. Live execution remains stubbed.
 
+Backtest data can be sourced from `ccxt-binance`, `vercel-market-data-proxy`, `local-cache`, or `local-file`. Historical OHLCV cache files live under `data/ohlcv-cache/` and are not part of the official proof unless candle integrity passes.
+
 ### Layer 1 — Trend Filter (EMA)
 
 ```text

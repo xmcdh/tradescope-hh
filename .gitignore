@@ -6,6 +6,8 @@ data/signal-log.json
 data/paper-trades.json
 data/proof-snapshots.json
 data/setup-approvals.json
+data/ohlcv-cache
+data/imports
 .env
 .env.local
 .env.*.local

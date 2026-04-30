@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { runBacktest, validateCandleIntegrity } from '../lib/backtester.js';
 import { validateBacktest } from '../lib/backtestValidator.js';
 import { strategyMetadata } from '../config/strategyVersion.js';
+import { fetchBacktestOhlcv, normalizePair } from '../lib/backtestDataSource.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -38,118 +39,10 @@ function requiredDate(value, label) {
   return timestamp;
 }
 
-export function normalizePair(pair) {
-  if (pair.includes('/')) {
-    return pair.toUpperCase();
-  }
-
-  const upper = pair.toUpperCase();
-  if (upper.endsWith('USDT')) {
-    return `${upper.slice(0, -4)}/USDT`;
-  }
-
-  return upper;
-}
-
 export function outputName({ pair, timeframe, from, to, prefix = '' }) {
   const safePair = pair.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   return `${prefix}${safePair}-${timeframe}-${from}-to-${to}-${stamp}.json`;
-}
-
-async function loadCcxt() {
-  try {
-    return await import('ccxt');
-  } catch {
-    throw new Error('CCXT is required for backtesting. Install it with `npm install ccxt`.');
-  }
-}
-
-function classifyFetchError(error) {
-  const message = String(error?.message ?? error ?? '');
-  const lower = message.toLowerCase();
-
-  if (lower.includes('exchangeinfo') || lower.includes('ddosprotection') || lower.includes('cloudflare')) {
-    return 'Binance provider blocking detected while loading markets. Try a different network or a local residential connection.';
-  }
-
-  if (lower.includes('network') || lower.includes('fetch failed') || lower.includes('econnreset') || lower.includes('enotfound')) {
-    return 'Network fetch failed while requesting Binance candles. Check connectivity or provider blocking.';
-  }
-
-  if (lower.includes('bad symbol') || lower.includes('not supported')) {
-    return 'Requested pair or timeframe is unavailable on the selected Binance market type.';
-  }
-
-  return message || 'Unknown backtest fetch error.';
-}
-
-export async function fetchOhlcv({ pair, timeframe, fromMs, toMs, marketType }) {
-  const ccxt = await loadCcxt();
-  const useUsdm = ['future', 'futures', 'swap', 'usdm'].includes(String(marketType).toLowerCase());
-  const ExchangeClass = useUsdm && ccxt.binanceusdm ? ccxt.binanceusdm : ccxt.binance;
-  const exchange = new ExchangeClass({
-    enableRateLimit: true,
-    options: {
-      defaultType: marketType,
-    },
-  });
-
-  try {
-    await exchange.loadMarkets();
-  } catch (error) {
-    throw new Error(classifyFetchError(error));
-  }
-
-  const limit = 1000;
-  const rows = [];
-  let since = fromMs;
-  const marketSymbol = exchange.markets[pair] ? pair : exchange.markets[`${pair}:USDT`] ? `${pair}:USDT` : pair;
-
-  while (since < toMs) {
-    let batch;
-
-    try {
-      batch = await exchange.fetchOHLCV(marketSymbol, timeframe, since, limit);
-    } catch (error) {
-      throw new Error(classifyFetchError(error));
-    }
-
-    if (!batch.length) {
-      break;
-    }
-
-    for (const row of batch) {
-      if (row[0] >= toMs) {
-        break;
-      }
-      rows.push(row);
-    }
-
-    const lastTimestamp = batch[batch.length - 1][0];
-    const nextSince = lastTimestamp + 1;
-    if (nextSince <= since) {
-      break;
-    }
-    since = nextSince;
-  }
-
-  if (!rows.length) {
-    throw new Error('No OHLCV data returned by Binance for the requested range.');
-  }
-
-  return {
-    exchangeId: exchange.id,
-    marketSymbol,
-    candles: rows.map(([timestamp, open, high, low, close, volume]) => ({
-      time: Math.floor(timestamp / 1000),
-      open,
-      high,
-      low,
-      close,
-      volume,
-    })),
-  };
 }
 
 async function hashFiles(filePaths) {
@@ -194,6 +87,12 @@ export async function executeBacktestRun({
   to,
   marketType = 'future',
   signalMode = 'conservative',
+  dataSource = 'ccxt-binance',
+  fallbackDataSource = '',
+  writeCache = false,
+  cacheDir = undefined,
+  file = '',
+  proxyBaseUrl = undefined,
   writeFile = true,
 }) {
   const normalizedPair = normalizePair(pair);
@@ -204,16 +103,48 @@ export async function executeBacktestRun({
     throw new Error('--to must be after --from.');
   }
 
-  const fetched = await fetchOhlcv({
-    pair: normalizedPair,
-    timeframe,
-    fromMs,
-    toMs,
-    marketType,
-  });
+  const sources = [
+    dataSource,
+    ...String(fallbackDataSource ?? '')
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ];
+  const attempts = [];
+  let fetched;
+
+  for (const source of sources) {
+    try {
+      fetched = await fetchBacktestOhlcv({
+        pair: normalizedPair,
+        timeframe,
+        from,
+        to,
+        marketType,
+        dataSource: source,
+        writeCache,
+        cacheDir,
+        file,
+        proxyBaseUrl,
+      });
+      attempts.push({ source, ok: true, candleCount: fetched.candles.length });
+      break;
+    } catch (error) {
+      attempts.push({ source, ok: false, error: error.message });
+    }
+  }
+
+  if (!fetched) {
+    const messages = attempts.map((attempt) => `${attempt.source}: ${attempt.error}`).join(' | ');
+    throw new Error(`All backtest data sources failed. ${messages}`);
+  }
+
+  const integrity = validateCandleIntegrity(fetched.candles, timeframe);
+  if (!integrity.valid) {
+    throw new Error(`Backtest candle integrity failed: ${integrity.issues.join(' | ')}`);
+  }
 
   const strategyMeta = await buildVersionMetadata();
-  const integrity = validateCandleIntegrity(fetched.candles, timeframe);
   const pairKey = normalizedPair.replace('/', '');
   const backtest = runBacktest(fetched.candles, pairKey, timeframe, { signalMode });
   const validation = validateBacktest(fetched.candles, pairKey, timeframe, { signalMode });
@@ -228,6 +159,10 @@ export async function executeBacktestRun({
       sourceExchange: fetched.exchangeId,
       marketSymbol: fetched.marketSymbol,
       marketType,
+      dataSource: fetched.source,
+      requestedDataSource: dataSource,
+      dataSourceAttempts: attempts,
+      cachePath: fetched.cachePath ?? null,
       ...strategyMeta,
     },
     integrity,
@@ -257,6 +192,12 @@ async function main() {
       to: args.to ?? null,
       marketType: args.market ?? 'future',
       signalMode: args.mode ?? 'conservative',
+      dataSource: args['data-source'] ?? args.dataSource ?? 'ccxt-binance',
+      fallbackDataSource: args['fallback-data-source'] ?? args.fallbackDataSource ?? '',
+      writeCache: args['write-cache'] ?? args.writeCache ?? false,
+      cacheDir: args['cache-dir'] ?? args.cacheDir,
+      file: args.file ?? '',
+      proxyBaseUrl: args['proxy-base-url'] ?? args.proxyBaseUrl,
       writeFile: true,
     });
 

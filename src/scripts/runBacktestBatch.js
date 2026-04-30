@@ -39,6 +39,12 @@ async function main() {
   const to = args.to ?? isoDate(0);
   const marketType = args.market ?? 'future';
   const signalMode = args.mode ?? 'conservative';
+  const dataSource = args['data-source'] ?? args.dataSource ?? 'ccxt-binance';
+  const fallbackDataSource = args['fallback-data-source'] ?? args.fallbackDataSource ?? '';
+  const writeCache = args['write-cache'] ?? args.writeCache ?? false;
+  const cacheDir = args['cache-dir'] ?? args.cacheDir;
+  const file = args.file ?? '';
+  const proxyBaseUrl = args['proxy-base-url'] ?? args.proxyBaseUrl;
   const results = [];
   const failures = [];
 
@@ -52,6 +58,12 @@ async function main() {
           to,
           marketType,
           signalMode,
+          dataSource,
+          fallbackDataSource,
+          writeCache,
+          cacheDir,
+          file,
+          proxyBaseUrl,
           writeFile: true,
         });
 
@@ -65,13 +77,15 @@ async function main() {
           validation: payload.validation,
           warnings: payload.warnings ?? [],
         });
-        console.log(`[ok] ${pair} ${timeframe} -> ${path.basename(payload.outputPath ?? outputName({ pair, timeframe, from, to }))}`);
+        console.log(`[ok] ${pair} ${timeframe} [${payload.metadata.dataSource}] -> ${path.basename(payload.outputPath ?? outputName({ pair, timeframe, from, to }))}`);
       } catch (error) {
         const failure = {
           pair,
           timeframe,
           from,
           to,
+          requestedDataSource: dataSource,
+          fallbackDataSource,
           error: error.message,
         };
         failures.push(failure);
@@ -90,6 +104,9 @@ async function main() {
       to,
       marketType,
       signalMode,
+      dataSource,
+      fallbackDataSource,
+      writeCache: writeCache === true || writeCache === 'true',
       pairs,
       timeframes,
       runCount: pairs.length * timeframes.length,

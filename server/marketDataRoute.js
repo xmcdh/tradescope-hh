@@ -17,6 +17,8 @@ export function normalizeMarketDataQuery(query = {}) {
     symbol: String(query.symbol ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase(),
     interval: String(query.interval ?? '15m'),
     limit: String(query.limit ?? '100'),
+    startTime: query.startTime != null ? String(query.startTime).replace(/[^0-9]/g, '') : '',
+    endTime: query.endTime != null ? String(query.endTime).replace(/[^0-9]/g, '') : '',
   };
 }
 
@@ -156,6 +158,8 @@ export async function handleMarketDataRequest(rawQuery, fetcher = fetch) {
         symbol: query.symbol,
         interval: query.interval,
         limit: query.limit,
+        ...(query.startTime ? { startTime: query.startTime } : {}),
+        ...(query.endTime ? { endTime: query.endTime } : {}),
       },
       fetcher,
     );

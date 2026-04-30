@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import {
   calculatePerformance,
   runBacktest,
@@ -8,6 +10,14 @@ import {
 } from '../src/lib/backtester.js';
 import { evaluateSplitValidation, validateBacktest } from '../src/lib/backtestValidator.js';
 import { strategyVersion } from '../src/config/strategyVersion.js';
+import {
+  cacheFilePath,
+  fetchBacktestOhlcv,
+  fetchVercelMarketDataOhlcv,
+  readCachedOhlcv,
+  writeOhlcvCache,
+} from '../src/lib/backtestDataSource.js';
+import { executeBacktestRun } from '../src/scripts/runBacktest.js';
 
 function makeCandles(count, start = 100) {
   const candles = [];
@@ -139,6 +149,141 @@ test('validateCandleIntegrity detects duplicate timestamps and missing gaps', ()
   assert.equal(integrity.valid, false);
   assert.ok(integrity.issues.some((item) => item.startsWith('DUPLICATE_TIMESTAMPS')));
   assert.ok(integrity.issues.some((item) => item.startsWith('MISSING_CANDLES')));
+});
+
+test('backtest data source writes and reads local cache with strategy metadata', async () => {
+  const cacheDir = path.join('/tmp', `tradescope-ohlcv-cache-${Date.now()}`);
+  const candles = makeCandles(260);
+  const cachePath = await writeOhlcvCache({
+    pair: 'BTC/USDT',
+    timeframe: '15m',
+    from: '2024-01-01',
+    to: '2024-07-01',
+    source: 'unit-test',
+    candles,
+    cacheDir,
+  });
+  const cached = await readCachedOhlcv({
+    pair: 'BTC/USDT',
+    timeframe: '15m',
+    from: '2024-01-01',
+    to: '2024-07-01',
+    cacheDir,
+  });
+
+  assert.equal(cachePath, cacheFilePath({ pair: 'BTC/USDT', timeframe: '15m', from: '2024-01-01', to: '2024-07-01', cacheDir }));
+  assert.equal(cached.source, 'local-cache');
+  assert.equal(cached.cachePayload.strategyVersion, strategyVersion);
+  assert.equal(cached.candles.length, 260);
+});
+
+test('local cache rejects duplicate or missing candles', async () => {
+  const cacheDir = path.join('/tmp', `tradescope-ohlcv-cache-bad-${Date.now()}`);
+  const candles = makeCandles(260);
+  candles[10] = { ...candles[9] };
+  await writeOhlcvCache({
+    pair: 'BTC/USDT',
+    timeframe: '15m',
+    from: '2024-01-01',
+    to: '2024-07-01',
+    source: 'unit-test',
+    candles,
+    cacheDir,
+  });
+
+  await assert.rejects(
+    readCachedOhlcv({
+      pair: 'BTC/USDT',
+      timeframe: '15m',
+      from: '2024-01-01',
+      to: '2024-07-01',
+      cacheDir,
+    }),
+    /candle integrity failed/,
+  );
+});
+
+test('local-file data source can run a versioned backtest', async () => {
+  const importDir = path.join('/tmp', `tradescope-import-${Date.now()}`);
+  await fs.mkdir(importDir, { recursive: true });
+  const file = path.join(importDir, 'BTCUSDT-15m.json');
+  await fs.writeFile(file, `${JSON.stringify(makeCandles(260))}\n`);
+
+  const payload = await executeBacktestRun({
+    pair: 'BTC/USDT',
+    timeframe: '15m',
+    from: '2024-01-01',
+    to: '2024-07-01',
+    dataSource: 'local-file',
+    file,
+    writeFile: false,
+  });
+
+  assert.equal(payload.metadata.strategyVersion, strategyVersion);
+  assert.equal(payload.metadata.dataSource, 'local-file');
+  assert.equal(payload.metadata.candleCount, 260);
+  assert.equal(payload.integrity.valid, true);
+});
+
+test('vercel market-data proxy normalizes paginated kline payloads', async () => {
+  const rows = makeCandles(260, 100).map((candle, index) => ({
+    ...candle,
+    time: 1_704_067_200 + index * 900,
+  })).map((candle) => [
+    candle.time * 1000,
+    String(candle.open),
+    String(candle.high),
+    String(candle.low),
+    String(candle.close),
+    String(candle.volume),
+  ]);
+  const calls = [];
+  const result = await fetchVercelMarketDataOhlcv({
+    pair: 'BTC/USDT',
+    timeframe: '15m',
+    from: '2024-01-01',
+    to: '2024-07-01',
+    fetcher: async (url) => {
+      calls.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify(calls.length === 1 ? rows : []);
+        },
+      };
+    },
+  });
+
+  assert.equal(result.source, 'vercel-market-data-proxy');
+  assert.equal(result.candles.length, 260);
+  assert.match(calls[0], /startTime=/);
+  assert.match(calls[0], /endTime=/);
+});
+
+test('fetchBacktestOhlcv selects local-cache source', async () => {
+  const cacheDir = path.join('/tmp', `tradescope-ohlcv-cache-select-${Date.now()}`);
+  await writeOhlcvCache({
+    pair: 'BTC/USDT',
+    timeframe: '15m',
+    from: '2024-01-01',
+    to: '2024-07-01',
+    source: 'unit-test',
+    candles: makeCandles(260),
+    cacheDir,
+  });
+
+  const result = await fetchBacktestOhlcv({
+    pair: 'BTC/USDT',
+    timeframe: '15m',
+    from: '2024-01-01',
+    to: '2024-07-01',
+    dataSource: 'local-cache',
+    cacheDir,
+  });
+
+  assert.equal(result.source, 'local-cache');
+  assert.equal(result.integrity.valid, true);
 });
 
 test('evaluateSplitValidation flags negative OOS expectancy and excessive win-rate drop', () => {

@@ -12,6 +12,8 @@
     "backtest:report": "node src/scripts/generateBacktestReport.js",
     "proof:snapshot": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/writeProofSnapshot.js",
     "paper:report": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/generatePaperReport.js",
+    "paper:daily-check": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/dailyPaperCheck.js",
+    "paper:weekly-audit": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/weeklyPaperAudit.js",
     "db:check": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/checkDatabase.js",
     "test:signal": "node --test tests/signalLogic.test.js"
   },

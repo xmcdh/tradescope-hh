@@ -130,6 +130,8 @@ export function paperProofReportMarkdown(report) {
     `- Last approved paper trade: ${report.paperHealth?.lastApprovedPaperTradeAt ?? '--'}`,
     `- Last observation signal: ${report.paperHealth?.lastObservationSignalAt ?? '--'}`,
     `- Last proof snapshot: ${report.paperHealth?.lastSnapshotAt ?? '--'}`,
+    `- Snapshot freshness: ${report.paperHealth?.snapshotFreshness ?? 'MISSING'}`,
+    `- Live execution: ${report.paperHealth?.liveExecutionStatus ?? 'UNKNOWN'}`,
     '',
     '## Live Gate Checklist',
     ...failed,

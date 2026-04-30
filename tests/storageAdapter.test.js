@@ -5,7 +5,12 @@ import { createStorageAdapter, inspectStorageEnv } from '../src/lib/storageAdapt
 import { classifySignalForPaper, SETUP_STATUS } from '../src/lib/setupRegistry.js';
 import { inspectDatabaseSchema } from '../src/scripts/checkDatabase.js';
 import { paperProofReportMarkdown } from '../src/lib/paperProofReport.js';
-import { summarizePaperHealth } from '../src/lib/paperHealth.js';
+import { calculateSnapshotFreshness, summarizePaperHealth } from '../src/lib/paperHealth.js';
+import {
+  detectPaperAuditAnomalies,
+  formatDailyPaperCheck,
+  weeklyPaperAuditMarkdown,
+} from '../src/lib/paperAudit.js';
 import liveExecutionHandler from '../api/live-execution.js';
 
 function healthyPoolFactory() {
@@ -325,6 +330,8 @@ test('paper proof report markdown includes official start and non-gate categorie
       lastApprovedPaperTradeAt: null,
       lastObservationSignalAt: '2026-04-30T01:00:00.000Z',
       lastSnapshotAt: null,
+      snapshotFreshness: 'MISSING',
+      liveExecutionStatus: 'STUBBED',
     },
     eligibleSetups: [
       {
@@ -359,6 +366,7 @@ test('paper proof report markdown includes official start and non-gate categorie
   assert.match(markdown, /Next required milestone:/);
   assert.match(markdown, /BTC\/USDT 1h: APPROVED_FOR_PAPER/);
   assert.match(markdown, /Observation-only total: 2/);
+  assert.match(markdown, /Snapshot freshness: MISSING/);
   assert.match(markdown, /Final verdict: NOT READY/);
 });
 
@@ -416,7 +424,146 @@ test('paper health aggregates approved, observation, rejected, blocked, and snap
   assert.equal(health.lastApprovedPaperTradeAt, '2026-04-30T03:00:00.000Z');
   assert.equal(health.lastObservationSignalAt, '2026-04-30T04:00:00.000Z');
   assert.equal(health.lastSnapshotAt, '2026-04-30T23:00:00.000Z');
+  assert.equal(health.snapshotFreshness, 'STALE');
+  assert.equal(health.liveExecutionStatus, 'STUBBED');
   assert.equal(health.globalVerdict, 'NOT READY');
+});
+
+test('snapshot freshness reports missing, stale, and fresh', () => {
+  const now = new Date('2026-05-01T12:00:00.000Z');
+  assert.equal(calculateSnapshotFreshness({ now }), 'MISSING');
+  assert.equal(calculateSnapshotFreshness({ now, lastSnapshotAt: '2026-04-30T23:59:59.000Z' }), 'STALE');
+  assert.equal(calculateSnapshotFreshness({ now, lastSnapshotAt: '2026-05-01T00:00:00.000Z' }), 'FRESH');
+});
+
+test('daily paper check output summarizes empty day one state', () => {
+  const output = formatDailyPaperCheck({
+    storageAuthority: 'AUTHORITATIVE',
+    storageDurable: true,
+    currentDay: 1,
+    minimumDays: 28,
+    daysElapsed: 0,
+    daysRemaining: 28,
+    approvedClosedTrades: 0,
+    approvedOpenTrades: 0,
+    observationOnlyCount: 0,
+    rejectedSetupCount: 0,
+    blockedSignalCount: 0,
+    lastApprovedPaperTradeAt: null,
+    lastObservationSignalAt: null,
+    lastSnapshotAt: null,
+    snapshotFreshness: 'MISSING',
+    liveExecutionStatus: 'STUBBED',
+    globalVerdict: 'NOT READY',
+  });
+
+  assert.match(output, /Storage: AUTHORITATIVE/);
+  assert.match(output, /Paper Day: 1 \/ 28/);
+  assert.match(output, /Approved Closed Trades: 0 \/ 30/);
+  assert.match(output, /Verdict: NOT READY/);
+  assert.match(output, /Run npm run proof:snapshot/);
+});
+
+test('weekly audit detects paper counting anomalies', () => {
+  const anomalies = detectPaperAuditAnomalies({
+    storage: { authoritative: true, durable: true },
+    paperHealth: { snapshotFreshness: 'MISSING' },
+    liveExecutionStatus: 'UNKNOWN',
+    trades: [
+      {
+        id: 'eth-approved',
+        pair: 'ETH/USDT',
+        timeframe: '1h',
+        direction: 'LONG',
+        signalValidity: 'VALID',
+        setupStatus: 'APPROVED_FOR_PAPER',
+        proofStatus: 'INSUFFICIENT_SAMPLE',
+        paperCategory: 'PAPER_ELIGIBLE',
+        isApprovedPaperTrade: true,
+        openedAt: '2026-04-30T01:00:00.000Z',
+        entry: 100,
+        stopLoss: 98,
+        takeProfit: 104,
+      },
+      {
+        id: 'sol-approved',
+        pair: 'SOL/USDT',
+        timeframe: '15m',
+        direction: 'SHORT',
+        signalValidity: 'VALID',
+        setupStatus: 'REJECTED_OOS_FAILURE',
+        proofStatus: 'FAILED_OOS',
+        paperCategory: 'PAPER_ELIGIBLE',
+        isApprovedPaperTrade: true,
+        openedAt: '2026-04-30T01:00:00.000Z',
+        entry: 100,
+        stopLoss: 102,
+        takeProfit: 96,
+      },
+      {
+        id: 'blocked-approved',
+        pair: 'BTC/USDT',
+        timeframe: '1h',
+        direction: 'LONG',
+        signalValidity: 'BLOCKED',
+        setupStatus: 'APPROVED_FOR_PAPER',
+        proofStatus: 'PROVEN_READY_FOR_PAPER',
+        paperCategory: 'PAPER_ELIGIBLE',
+        isApprovedPaperTrade: true,
+        openedAt: '2026-04-30T01:00:00.000Z',
+        entry: 100,
+        stopLoss: 98,
+        takeProfit: 104,
+      },
+      {
+        id: 'pre-start',
+        pair: 'BTC/USDT',
+        timeframe: '1h',
+        direction: 'LONG',
+        signalValidity: 'VALID',
+        setupStatus: 'APPROVED_FOR_PAPER',
+        proofStatus: 'PROVEN_READY_FOR_PAPER',
+        paperCategory: 'PAPER_ELIGIBLE',
+        isApprovedPaperTrade: true,
+        openedAt: '2026-04-29T23:00:00.000Z',
+        entry: 100,
+        stopLoss: 98,
+        takeProfit: 104,
+      },
+    ],
+  });
+  const codes = anomalies.map((item) => item.code);
+
+  assert.ok(codes.includes('ETH_OBSERVATION_COUNTED_APPROVED'));
+  assert.ok(codes.includes('SOL_REJECTED_COUNTED_APPROVED'));
+  assert.ok(codes.includes('REJECTED_SETUP_COUNTED_APPROVED'));
+  assert.ok(codes.includes('BLOCKED_SIGNAL_COUNTED_APPROVED'));
+  assert.ok(codes.includes('PRE_START_TRADE_COUNTED'));
+  assert.ok(codes.includes('SNAPSHOT_NOT_FRESH'));
+  assert.ok(codes.includes('LIVE_EXECUTION_NOT_STUBBED'));
+});
+
+test('weekly audit markdown includes anomalies and next action', () => {
+  const markdown = weeklyPaperAuditMarkdown({
+    generatedAt: '2026-04-30T00:00:00.000Z',
+    dateRange: { from: '2026-04-24', to: '2026-04-30' },
+    storage: { authority: 'AUTHORITATIVE' },
+    officialPaperTrackingStartDate: '2026-04-30',
+    daysElapsed: 0,
+    daysRemaining: 28,
+    minimumDays: 28,
+    globalVerdict: 'NOT READY',
+    approvedSetupList: [{ pair: 'BTC/USDT', timeframe: '1h', setupStatus: 'APPROVED_FOR_PAPER' }],
+    approvedOnlyMetrics: { open: 0, closed: 0, winRate: 0, expectancy: 0, maxDrawdown: 0 },
+    nonGateCounts: { observationOnly: 0, rejectedSetup: 0, blockedSignal: 0 },
+    gateChecklist: ['MIN_CLOSED_TRADES (0/30)'],
+    anomalies: [{ code: 'SNAPSHOT_NOT_FRESH', message: 'No proof snapshot exists.', tradeId: null }],
+    nextRecommendedAction: 'Review anomalies before relying on paper data.',
+  });
+
+  assert.match(markdown, /TradeScope Weekly Paper Audit/);
+  assert.match(markdown, /SNAPSHOT_NOT_FRESH/);
+  assert.match(markdown, /Next recommended action:/);
 });
 
 test('live execution endpoint remains stubbed', async () => {

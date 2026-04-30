@@ -34,6 +34,21 @@ function latestIso(items, selector) {
   return Number.isFinite(latest) ? new Date(latest).toISOString() : null;
 }
 
+export function calculateSnapshotFreshness({ lastSnapshotAt, now = new Date() } = {}) {
+  if (!lastSnapshotAt) {
+    return 'MISSING';
+  }
+
+  const snapshotTimestamp = Date.parse(lastSnapshotAt);
+  if (!Number.isFinite(snapshotTimestamp)) {
+    return 'MISSING';
+  }
+
+  const today = now.toISOString().slice(0, 10);
+  const snapshotDay = new Date(snapshotTimestamp).toISOString().slice(0, 10);
+  return snapshotDay === today ? 'FRESH' : 'STALE';
+}
+
 function isApprovedPaperTrade(trade) {
   return (
     trade?.isApprovedPaperTrade === true &&
@@ -61,6 +76,7 @@ export function summarizePaperHealth({
   const blocked = list.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL');
   const storageInfo = storage ?? liveGate?.storage ?? {};
   const currentDay = now.getTime() >= countdown.startTimestamp ? countdown.elapsedDays + 1 : 0;
+  const lastSnapshotAt = latestIso(snapshotList, (snapshot) => timestampOf(snapshot.generatedAt ?? snapshot.createdAt ?? snapshot.updatedAt));
 
   return {
     storageAuthority: storageInfo.authority ?? (storageInfo.durable ? 'AUTHORITATIVE' : 'LOCAL_ONLY'),
@@ -79,7 +95,9 @@ export function summarizePaperHealth({
     blockedSignalCount: blocked.length,
     lastApprovedPaperTradeAt: latestIso(approvedTrades, tradeTimestamp),
     lastObservationSignalAt: latestIso(observationOnly, tradeTimestamp),
-    lastSnapshotAt: latestIso(snapshotList, (snapshot) => timestampOf(snapshot.generatedAt ?? snapshot.createdAt ?? snapshot.updatedAt)),
+    lastSnapshotAt,
+    snapshotFreshness: calculateSnapshotFreshness({ lastSnapshotAt, now }),
+    liveExecutionStatus: 'STUBBED',
     liveGateStatus: {
       ready: Boolean(liveGate?.ready),
       paperGatePassed: Boolean(liveGate?.paperGatePassed),

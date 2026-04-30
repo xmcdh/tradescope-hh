@@ -65,6 +65,32 @@ function TradeTable({ title, rows, emptyLabel }) {
   );
 }
 
+function OperatorNudge({ paperHealth }) {
+  const nudges = [];
+
+  if (paperHealth?.storageAuthority !== 'AUTHORITATIVE') {
+    nudges.push('Paper data cannot count until storage is authoritative.');
+  }
+  if (paperHealth?.snapshotFreshness === 'MISSING' || paperHealth?.snapshotFreshness === 'STALE') {
+    nudges.push('Run npm run proof:snapshot to capture today\'s durable proof snapshot.');
+  }
+  if ((paperHealth?.approvedOpenTrades ?? 0) === 0 && (paperHealth?.approvedClosedTrades ?? 0) === 0) {
+    nudges.push('No approved paper trades yet. Continue monitoring BTC/USDT 1h only.');
+  }
+
+  if (!nudges.length) {
+    return null;
+  }
+
+  return (
+    <div className="border-t border-[var(--border-subtle)] px-4 py-3 text-sm text-[var(--accent-yellow)]">
+      {nudges.map((item) => (
+        <div key={item}>{item}</div>
+      ))}
+    </div>
+  );
+}
+
 export default function PaperTradingPage() {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState('');
@@ -163,12 +189,15 @@ export default function PaperTradingPage() {
             <div>Rejected/blocked signals: {(paperHealth?.rejectedSetupCount ?? rejectedTrades.length) + (paperHealth?.blockedSignalCount ?? blockedTrades.length)}</div>
             <div>Last approved paper trade: {paperHealth?.lastApprovedPaperTradeAt ? new Date(paperHealth.lastApprovedPaperTradeAt).toLocaleString('id-ID') : '--'}</div>
             <div>Last proof snapshot: {paperHealth?.lastSnapshotAt ? new Date(paperHealth.lastSnapshotAt).toLocaleString('id-ID') : '--'}</div>
+            <div>Snapshot freshness: {paperHealth?.snapshotFreshness ?? 'MISSING'}</div>
+            <div>Live execution: {paperHealth?.liveExecutionStatus ?? 'UNKNOWN'}</div>
             <div>Current verdict: {paperHealth?.globalVerdict ?? 'NOT READY'}</div>
             <div>Paper Tracking Source: {gate?.storage?.authoritative ? 'Durable Database' : 'Local JSON'}</div>
           </div>
           <div className="border-t border-[var(--border-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">
             Only approved BTC/USDT 1h trades count right now. Observation-only and rejected setups are not counted toward live readiness.
           </div>
+          <OperatorNudge paperHealth={paperHealth} />
         </section>
 
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">

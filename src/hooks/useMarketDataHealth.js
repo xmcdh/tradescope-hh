@@ -5,13 +5,17 @@ const PROXY = import.meta.env.DEV ? 'http://localhost:3001' : '';
 const HEALTH_POLL_MS = 30000;
 const TEST_SYMBOL = 'BTCUSDT';
 
+function marketDataPath(provider, type, extra = '') {
+  return `/api/market-data?provider=${provider}&type=${type}&symbol=${TEST_SYMBOL}${extra}`;
+}
+
 const ENDPOINTS = [
-  { key: 'binance-klines', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Klines', path: `/api/klines/${TEST_SYMBOL}?interval=15m&limit=5`, signalCritical: true },
-  { key: 'binance-ticker', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Ticker', path: `/api/ticker/${TEST_SYMBOL}` },
-  { key: 'binance-funding', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Funding', path: `/api/funding/${TEST_SYMBOL}` },
-  { key: 'binance-oi', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Open Interest', path: `/api/openinterest/${TEST_SYMBOL}` },
-  { key: 'bybit-klines', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Klines', path: `/api/bybit/klines/${TEST_SYMBOL}?interval=15m&limit=5`, signalCritical: true },
-  { key: 'bybit-ticker', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Ticker', path: `/api/bybit/ticker/${TEST_SYMBOL}` },
+  { key: 'binance-klines', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Klines', path: marketDataPath('binance', 'klines', '&interval=15m&limit=5'), signalCritical: true },
+  { key: 'binance-ticker', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Ticker', path: marketDataPath('binance', 'ticker') },
+  { key: 'binance-funding', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Funding', path: marketDataPath('binance', 'funding') },
+  { key: 'binance-oi', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Open Interest', path: marketDataPath('binance', 'openinterest') },
+  { key: 'bybit-klines', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Klines', path: marketDataPath('bybit', 'klines', '&interval=15m&limit=5'), signalCritical: true },
+  { key: 'bybit-ticker', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Ticker', path: marketDataPath('bybit', 'ticker') },
 ];
 
 function statusFromErrorType(errorType) {

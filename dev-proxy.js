@@ -11,6 +11,7 @@ import {
   isBlockedHtml,
   isHtmlResponse,
 } from './server/binanceProxy.js';
+import { handleMarketDataRequest } from './server/marketDataRoute.js';
 
 const app = express();
 const insecureTlsAgent = new https.Agent({ rejectUnauthorized: false });
@@ -194,6 +195,23 @@ app.get('/api/binance', async (req, res) => {
       res,
       buildErrorPayload({
         endpoint: String(req.query.endpoint ?? 'unknown'),
+        symbol: req.query.symbol,
+        errorType: ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
+        message: error.message,
+      }),
+    );
+  }
+});
+
+app.get('/api/market-data', async (req, res) => {
+  try {
+    const result = await handleMarketDataRequest(req.query, fetchWithDevTlsFallback);
+    forwardProxyResult(res, result);
+  } catch (error) {
+    sendError(
+      res,
+      buildErrorPayload({
+        endpoint: String(req.query.type ?? 'market-data'),
         symbol: req.query.symbol,
         errorType: ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
         message: error.message,

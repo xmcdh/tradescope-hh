@@ -344,8 +344,12 @@ export async function fetchBinanceBatchPrices(symbols) {
 export async function fetchBinanceFunding(symbol) {
   const normalized = normalizeSymbol(symbol);
   const payload = await fetchBinanceJson(
-    `/api/funding/${normalized}`,
-    {},
+    '/api/market-data',
+    {
+      provider: 'binance',
+      type: 'funding',
+      symbol: normalized,
+    },
     'Binance funding rate',
   );
 
@@ -364,8 +368,12 @@ export async function fetchBinanceFunding(symbol) {
 export async function fetchBinanceOpenInterest(symbol) {
   const normalized = normalizeSymbol(symbol);
   const payload = await fetchBinanceJson(
-    `/api/openinterest/${normalized}`,
-    {},
+    '/api/market-data',
+    {
+      provider: 'binance',
+      type: 'openinterest',
+      symbol: normalized,
+    },
     'Binance open interest',
   );
 

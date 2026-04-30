@@ -22,6 +22,9 @@
   "functions": {
     "api/*.js": {
       "regions": ["sin1"]
+    },
+    "api/**/*.js": {
+      "regions": ["sin1"]
     }
   }
 }

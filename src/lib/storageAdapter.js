@@ -14,14 +14,38 @@ const COLLECTION_FILES = {
   proofSnapshots: 'proof-snapshots.json',
   setupApprovals: 'setup-approvals.json',
 };
+const ALLOWED_STORAGE_MODES = new Set(['database', 'memory', 'local-json']);
 
 function isProductionRuntime() {
   return process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
 }
 
+export function inspectStorageEnv(env = process.env) {
+  const rawStorageMode = env.STORAGE_MODE;
+  const storageModeTrimmed = typeof rawStorageMode === 'string' ? rawStorageMode.trim() : '';
+  const normalizedStorageMode = storageModeTrimmed.toLowerCase();
+  const hasStorageModeEnv = typeof rawStorageMode === 'string';
+  const hasDatabaseUrlEnv = typeof env.DATABASE_URL === 'string' && env.DATABASE_URL.length > 0;
+  const databaseUrlLength = typeof env.DATABASE_URL === 'string' ? env.DATABASE_URL.length : 0;
+  const invalidStorageMode = hasStorageModeEnv && !ALLOWED_STORAGE_MODES.has(normalizedStorageMode);
+
+  return {
+    hasStorageModeEnv,
+    rawStorageModeLength: typeof rawStorageMode === 'string' ? rawStorageMode.length : 0,
+    storageModeTrimmed,
+    normalizedStorageMode: invalidStorageMode ? 'local-json' : normalizedStorageMode || 'local-json',
+    invalidStorageMode,
+    hasDatabaseUrlEnv,
+    databaseUrlLength,
+    nodeEnv: env.NODE_ENV ?? '',
+    vercelEnv: env.VERCEL_ENV ?? '',
+    deploymentRegion: env.VERCEL_REGION ?? env.AWS_REGION ?? '',
+  };
+}
+
 function normalizeMode(value) {
-  const mode = String(value ?? 'local-json').toLowerCase();
-  return ['database', 'memory', 'local-json'].includes(mode) ? mode : 'local-json';
+  const mode = String(value ?? 'local-json').trim().toLowerCase();
+  return ALLOWED_STORAGE_MODES.has(mode) ? mode : 'local-json';
 }
 
 function normalizeCollectionValue(value) {
@@ -37,12 +61,15 @@ function buildStatus({
   canConnect = false,
   connectionError = '',
   lastCheckedAt = new Date().toISOString(),
+  envDiagnostics = inspectStorageEnv(),
+  invalidStorageMode = false,
 }) {
   const requested = normalizeMode(requestedMode);
   const mode = normalizeMode(activeMode);
   const durable = mode === 'database' && Boolean(databaseUrl) && canConnect;
   const authoritative = durable;
   const connectionIssue = requested === 'database' && Boolean(databaseUrl) && !canConnect;
+  const invalidIssue = invalidStorageMode || envDiagnostics.invalidStorageMode;
 
   return {
     requestedMode: requested,
@@ -52,18 +79,30 @@ function buildStatus({
     durable,
     authoritative,
     authority: authoritative ? 'AUTHORITATIVE' : 'LOCAL_ONLY',
-    code: authoritative ? 'DURABLE_STORAGE' : 'NON_DURABLE_STORAGE',
+    code: authoritative ? 'DURABLE_STORAGE' : invalidIssue ? 'INVALID_STORAGE_MODE' : 'NON_DURABLE_STORAGE',
     provider: requested === 'database' ? provider ?? 'postgres' : null,
     databaseUrlPresent: Boolean(databaseUrl),
     canConnect: Boolean(canConnect),
     error: connectionError || '',
     lastCheckedAt,
     filePaths,
+    envDiagnostics: {
+      hasStorageModeEnv: envDiagnostics.hasStorageModeEnv,
+      rawStorageModeLength: envDiagnostics.rawStorageModeLength,
+      storageModeTrimmed: envDiagnostics.storageModeTrimmed,
+      hasDatabaseUrlEnv: envDiagnostics.hasDatabaseUrlEnv,
+      databaseUrlLength: envDiagnostics.databaseUrlLength,
+      nodeEnv: envDiagnostics.nodeEnv,
+      vercelEnv: envDiagnostics.vercelEnv,
+      deploymentRegion: envDiagnostics.deploymentRegion,
+    },
     warning: authoritative
       ? ''
-      : connectionIssue
-        ? DATABASE_CONNECTION_WARNING
-        : NON_DURABLE_STORAGE_WARNING,
+      : invalidIssue
+        ? 'Invalid STORAGE_MODE. Allowed values: database, local-json, memory.'
+        : connectionIssue
+          ? DATABASE_CONNECTION_WARNING
+          : NON_DURABLE_STORAGE_WARNING,
   };
 }
 
@@ -112,6 +151,7 @@ function createMemoryStorage(options = {}) {
         requestedMode: 'memory',
         activeMode: 'memory',
         canConnect: false,
+        envDiagnostics: inspectStorageEnv(options.env ?? {}),
       });
     },
     async readSignalLogs() {
@@ -213,7 +253,14 @@ function createLocalJsonStorage(options = {}) {
   }
 
   return {
-    async getStatus(requestedMode = 'local-json', provider = null, databaseUrl = '', connectionError = '') {
+    async getStatus(
+      requestedMode = 'local-json',
+      provider = null,
+      databaseUrl = '',
+      connectionError = '',
+      envDiagnostics = inspectStorageEnv(),
+      invalidStorageMode = false,
+    ) {
       await Promise.all(Object.keys(COLLECTION_FILES).map((key) => ensureFile(key)));
       return buildStatus({
         requestedMode,
@@ -223,6 +270,8 @@ function createLocalJsonStorage(options = {}) {
         filePaths: { ...filePaths },
         canConnect: false,
         connectionError,
+        envDiagnostics,
+        invalidStorageMode,
       });
     },
     readCollection,
@@ -232,9 +281,13 @@ function createLocalJsonStorage(options = {}) {
 }
 
 export function createStorageAdapter(options = {}) {
-  const requestedMode = normalizeMode(options.mode ?? process.env.STORAGE_MODE ?? 'local-json');
-  const databaseUrl = options.databaseUrl ?? process.env.DATABASE_URL ?? '';
-  const provider = options.provider ?? process.env.DATABASE_PROVIDER ?? 'postgres';
+  const env = options.env ?? process.env;
+  const envDiagnostics = inspectStorageEnv(env);
+  const rawRequestedMode = options.mode ?? env.STORAGE_MODE ?? 'local-json';
+  const invalidStorageMode = options.mode == null && envDiagnostics.invalidStorageMode;
+  const requestedMode = normalizeMode(rawRequestedMode);
+  const databaseUrl = options.databaseUrl ?? env.DATABASE_URL ?? '';
+  const provider = options.provider ?? env.DATABASE_PROVIDER ?? 'postgres';
   const local = createLocalJsonStorage(options);
   const memory = requestedMode === 'memory' ? createMemoryStorage(options) : null;
   const database = requestedMode === 'database'
@@ -269,7 +322,14 @@ export function createStorageAdapter(options = {}) {
       if (!databaseUrl) {
         return {
           backend: local,
-          status: await local.getStatus(requestedMode, provider, databaseUrl, 'DATABASE_URL is not configured.'),
+          status: await local.getStatus(
+            requestedMode,
+            provider,
+            databaseUrl,
+            'DATABASE_URL is not configured.',
+            envDiagnostics,
+            invalidStorageMode,
+          ),
         };
       }
 
@@ -285,19 +345,28 @@ export function createStorageAdapter(options = {}) {
             canConnect: true,
             connectionError: '',
             lastCheckedAt: health.lastCheckedAt,
+            envDiagnostics,
+            invalidStorageMode,
           }),
         };
       }
 
       return {
         backend: local,
-        status: await local.getStatus(requestedMode, provider, databaseUrl, health.error),
+        status: await local.getStatus(requestedMode, provider, databaseUrl, health.error, envDiagnostics, invalidStorageMode),
       };
     }
 
     return {
       backend: local,
-      status: await local.getStatus(requestedMode, provider, databaseUrl, ''),
+      status: await local.getStatus(
+        requestedMode,
+        provider,
+        databaseUrl,
+        invalidStorageMode ? 'INVALID_STORAGE_MODE' : '',
+        envDiagnostics,
+        invalidStorageMode,
+      ),
     };
   }
 

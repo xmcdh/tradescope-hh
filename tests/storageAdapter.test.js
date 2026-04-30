@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { createStorageAdapter } from '../src/lib/storageAdapter.js';
+import { createStorageAdapter, inspectStorageEnv } from '../src/lib/storageAdapter.js';
 import { classifySignalForPaper, SETUP_STATUS } from '../src/lib/setupRegistry.js';
 import { inspectDatabaseSchema } from '../src/scripts/checkDatabase.js';
 
@@ -108,6 +108,79 @@ test('storageAdapter detects durable database mode when database URL is present'
   assert.equal(await adapter.isDurableStorageConfigured(), true);
 });
 
+test('storageAdapter missing STORAGE_MODE defaults to local-json with safe diagnostics', async () => {
+  const dataDir = path.join('/tmp', `tradescope-storage-missing-env-${Date.now()}`);
+  const adapter = createStorageAdapter({
+    env: {},
+    dataDir,
+    fallbackDir: dataDir,
+  });
+
+  const status = await adapter.getStorageStatus();
+
+  assert.equal(status.requestedMode, 'local-json');
+  assert.equal(status.mode, 'local-json');
+  assert.equal(status.envDiagnostics.hasStorageModeEnv, false);
+  assert.equal(status.envDiagnostics.hasDatabaseUrlEnv, false);
+});
+
+test('storageAdapter reads STORAGE_MODE=database from process-style env', async () => {
+  const adapter = createStorageAdapter({
+    env: {
+      STORAGE_MODE: 'database',
+      DATABASE_PROVIDER: 'postgres',
+      DATABASE_URL: 'postgres://example:test@localhost:5432/tradescope',
+    },
+    poolFactory: healthyPoolFactory,
+  });
+
+  const status = await adapter.getStorageStatus();
+
+  assert.equal(status.requestedMode, 'database');
+  assert.equal(status.mode, 'database');
+  assert.equal(status.provider, 'postgres');
+  assert.equal(status.canConnect, true);
+  assert.equal(status.envDiagnostics.hasStorageModeEnv, true);
+  assert.equal(status.envDiagnostics.hasDatabaseUrlEnv, true);
+});
+
+test('storageAdapter trims STORAGE_MODE before normalization', async () => {
+  const adapter = createStorageAdapter({
+    env: {
+      STORAGE_MODE: 'database ',
+      DATABASE_PROVIDER: 'postgres',
+      DATABASE_URL: 'postgres://example:test@localhost:5432/tradescope',
+    },
+    poolFactory: healthyPoolFactory,
+  });
+
+  const status = await adapter.getStorageStatus();
+
+  assert.equal(status.requestedMode, 'database');
+  assert.equal(status.mode, 'database');
+  assert.equal(status.envDiagnostics.storageModeTrimmed, 'database');
+});
+
+test('storageAdapter reports invalid STORAGE_MODE clearly', async () => {
+  const dataDir = path.join('/tmp', `tradescope-storage-invalid-env-${Date.now()}`);
+  const adapter = createStorageAdapter({
+    env: {
+      STORAGE_MODE: 'postgres',
+      DATABASE_URL: 'postgres://example:test@localhost:5432/tradescope',
+    },
+    dataDir,
+    fallbackDir: dataDir,
+  });
+
+  const status = await adapter.getStorageStatus();
+
+  assert.equal(status.requestedMode, 'local-json');
+  assert.equal(status.code, 'INVALID_STORAGE_MODE');
+  assert.match(status.warning, /Invalid STORAGE_MODE/);
+  assert.equal(status.envDiagnostics.hasStorageModeEnv, true);
+  assert.equal(status.envDiagnostics.storageModeTrimmed, 'postgres');
+});
+
 test('storageAdapter requested database mode falls back to non-authoritative local mode when URL is missing', async () => {
   const dataDir = path.join('/tmp', `tradescope-storage-fallback-${Date.now()}`);
   const adapter = createStorageAdapter({
@@ -186,7 +259,26 @@ test('storage status does not expose secrets', async () => {
   const status = await adapter.getStorageStatus();
   assert.equal('databaseUrl' in status, false);
   assert.equal(status.databaseUrlPresent, true);
+  assert.equal(status.envDiagnostics.hasDatabaseUrlEnv, false);
   assert.doesNotMatch(JSON.stringify(status), /super-secret/);
+});
+
+test('inspectStorageEnv reports URL presence as boolean and length only', () => {
+  const diagnostics = inspectStorageEnv({
+    STORAGE_MODE: 'database ',
+    DATABASE_URL: 'postgres://secret-user:super-secret@localhost:5432/tradescope',
+    NODE_ENV: 'production',
+    VERCEL_ENV: 'production',
+    VERCEL_REGION: 'sin1',
+  });
+
+  assert.equal(diagnostics.hasStorageModeEnv, true);
+  assert.equal(diagnostics.rawStorageModeLength, 'database '.length);
+  assert.equal(diagnostics.storageModeTrimmed, 'database');
+  assert.equal(diagnostics.hasDatabaseUrlEnv, true);
+  assert.equal(diagnostics.databaseUrlLength, 'postgres://secret-user:super-secret@localhost:5432/tradescope'.length);
+  assert.equal('databaseUrl' in diagnostics, false);
+  assert.doesNotMatch(JSON.stringify(diagnostics), /super-secret/);
 });
 
 test('db:check reports missing tables and columns', async () => {

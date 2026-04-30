@@ -82,6 +82,24 @@ In the app:
 Operational rule:
 - if the app says `Current Proof Authority: Local Only`, paper results are not sufficient for live-readiness
 
+The API route `/api/storage-status` includes safe diagnostics that do not expose database credentials:
+
+- `hasStorageModeEnv`
+- `rawStorageModeLength`
+- `storageModeTrimmed`
+- `hasDatabaseUrlEnv`
+- `databaseUrlLength`
+- `nodeEnv`
+- `vercelEnv`
+- `deploymentRegion`
+
+Interpretation:
+
+- If `requestedMode: local-json` and `hasStorageModeEnv: false`, Vercel runtime is not receiving `STORAGE_MODE`. Set the variable in the same Vercel project, include the Production environment, redeploy after saving env, and confirm the production domain points to that deployment.
+- If `requestedMode: database` and `hasDatabaseUrlEnv: false`, `STORAGE_MODE` is active but `DATABASE_URL` is missing from the Production environment.
+- If `requestedMode: database`, `hasDatabaseUrlEnv: true`, and `canConnect: false`, env is active but Neon connection, schema, SSL, password, or database availability must be checked.
+- If `code: INVALID_STORAGE_MODE`, fix `STORAGE_MODE`. Allowed values are `database`, `local-json`, and `memory`.
+
 ## How To Confirm Paper Trading Is Authoritative
 
 All of the following must be true:

@@ -98,6 +98,7 @@ export function toMarkdown({ sourcePath, summary, liveGate }) {
     `- Final verdict: **${deriveVerdict({ proof, liveGate })}**`,
     `- Active strategy: **${activeStrategy.strategyVersion}**`,
     `- Risk model: **${activeStrategy.riskModel}**`,
+    `- Official v1.1 paper Day 1: **${activeStrategy.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}**`,
     `- Proof status: **${proof.status}**`,
     `- Tested setups: ${summary.results.length}`,
     `- Successes / failures: ${summary.metadata.successCount} / ${summary.metadata.failureCount}`,

@@ -47,6 +47,10 @@ export const OFFICIAL_PAPER_SETUPS = [
 ];
 
 export function officialPaperTrackingStartTimestamp() {
+  if (!OFFICIAL_PAPER_TRACKING_START_DATE) {
+    return null;
+  }
+
   return Date.parse(`${OFFICIAL_PAPER_TRACKING_START_DATE}T00:00:00.000Z`);
 }
 
@@ -56,7 +60,8 @@ export function activePaperTrackingPhase() {
 
 export function calculatePaperTrackingCountdown(nowMs = Date.now()) {
   const startTimestamp = officialPaperTrackingStartTimestamp();
-  const elapsedDays = Math.max(0, Math.floor((nowMs - startTimestamp) / (24 * 60 * 60 * 1000)));
+  const started = Number.isFinite(startTimestamp);
+  const elapsedDays = started ? Math.max(0, Math.floor((nowMs - startTimestamp) / (24 * 60 * 60 * 1000))) : 0;
   const remainingDays = Math.max(0, OFFICIAL_PAPER_TRACKING_MIN_DAYS - elapsedDays);
 
   return {
@@ -64,6 +69,7 @@ export function calculatePaperTrackingCountdown(nowMs = Date.now()) {
     riskModel: activeStrategy.riskModel,
     activatedAt: activeStrategy.activatedAt,
     officialPaperTrackingStartDate: OFFICIAL_PAPER_TRACKING_START_DATE,
+    officialPaperTrackingStatus: started ? 'ACTIVE' : 'PENDING_SETUP_APPROVAL',
     startTimestamp,
     minDays: OFFICIAL_PAPER_TRACKING_MIN_DAYS,
     elapsedDays,

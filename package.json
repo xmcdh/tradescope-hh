@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "backtest": "node src/scripts/runBacktest.js",
     "backtest:batch": "node src/scripts/runBacktestBatch.js",
-    "backtest:report": "node src/scripts/generateBacktestReport.js",
+    "backtest:report": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/generateBacktestReport.js",
     "proof:snapshot": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/writeProofSnapshot.js",
     "paper:report": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/generatePaperReport.js",
     "paper:daily-check": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/dailyPaperCheck.js",

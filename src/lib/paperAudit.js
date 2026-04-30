@@ -110,7 +110,8 @@ export function detectPaperAuditAnomalies({
     }
 
     const timestamp = tradeTimestamp(trade);
-    if (!Number.isFinite(timestamp) || timestamp < officialPaperTrackingStartTimestamp()) {
+    const trackingStart = officialPaperTrackingStartTimestamp();
+    if (!Number.isFinite(trackingStart) || !Number.isFinite(timestamp) || timestamp < trackingStart) {
       addAnomaly(anomalies, 'PRE_START_TRADE_COUNTED', 'Pre-start or undated trade is marked as approved-looking.', trade);
     }
 
@@ -152,6 +153,7 @@ export function formatDailyPaperCheck(health) {
     `Storage: ${health.storageAuthority ?? 'LOCAL_ONLY'}`,
     `Active Strategy: ${health.strategyVersion ?? ACTIVE_STRATEGY_VERSION}`,
     `Risk Model: ${health.riskModel ?? activeStrategy.riskModel}`,
+    `Official Paper Status: ${health.officialPaperTrackingStatus ?? 'PENDING_SETUP_APPROVAL'}`,
     `Paper Day: ${health.currentDay ?? 0} / ${health.minimumDays ?? 28}`,
     `Days Elapsed: ${health.daysElapsed ?? 0}`,
     `Days Remaining: ${health.daysRemaining ?? 28}`,
@@ -192,7 +194,8 @@ function markdownAudit(report) {
     `Storage authority: ${report.storage.authority}`,
     `Active Strategy Version: ${report.strategyVersion}`,
     `Risk Model: ${report.riskModel}`,
-    `Official Paper Tracking Day 1: ${report.officialPaperTrackingStartDate}`,
+    `Official Paper Tracking Day 1: ${report.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}`,
+    `Official Paper Tracking Status: ${report.officialPaperTrackingStatus ?? 'PENDING_SETUP_APPROVAL'}`,
     `Paper duration: ${report.daysElapsed} / ${report.minimumDays} days`,
     `Days remaining: ${report.daysRemaining}`,
     `Final verdict: ${report.globalVerdict}`,
@@ -254,6 +257,7 @@ export async function buildWeeklyPaperAudit({ now = new Date() } = {}) {
       durable: storage.durable,
     },
     officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
+    officialPaperTrackingStatus: countdown.officialPaperTrackingStatus,
     previousPaperHistoryExcluded: health.previousPaperHistoryExcluded,
     excludedHistoricalCount: health.excludedHistoricalCount,
     daysElapsed: countdown.elapsedDays,

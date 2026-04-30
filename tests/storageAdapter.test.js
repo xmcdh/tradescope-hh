@@ -317,7 +317,8 @@ test('paper proof report markdown includes official start and non-gate categorie
   const markdown = paperProofReportMarkdown({
     generatedAt: '2026-04-30T00:00:00.000Z',
     ...activeStrategy,
-    officialPaperTrackingStartDate: '2026-04-30',
+    officialPaperTrackingStartDate: null,
+    officialPaperTrackingStatus: 'PENDING_SETUP_APPROVAL',
     previousPaperHistoryExcluded: true,
     excludedHistoricalCount: 4,
     finalVerdict: 'NOT READY',
@@ -368,7 +369,8 @@ test('paper proof report markdown includes official start and non-gate categorie
     whyNotReady: ['MIN_CLOSED_TRADES (0/30)'],
   });
 
-  assert.match(markdown, /Official Paper Tracking Day 1: 2026-04-30/);
+  assert.match(markdown, /Official Paper Tracking Day 1: PENDING_SETUP_APPROVAL/);
+  assert.match(markdown, /Official Paper Tracking Status: PENDING_SETUP_APPROVAL/);
   assert.match(markdown, /Active Strategy Version: v1\.1-atr-risk/);
   assert.match(markdown, /Risk Model: ATR-based TP\/SL/);
   assert.match(markdown, /Historical excluded total: 4/);
@@ -426,8 +428,11 @@ test('paper health aggregates approved, observation, rejected, blocked, and snap
   });
 
   assert.equal(health.storageAuthority, 'AUTHORITATIVE');
-  assert.equal(health.daysElapsed, 1);
-  assert.equal(health.daysRemaining, 27);
+  assert.equal(health.daysElapsed, 0);
+  assert.equal(health.daysRemaining, 28);
+  assert.equal(health.currentDay, 0);
+  assert.equal(health.officialPaperTrackingStartDate, null);
+  assert.equal(health.officialPaperTrackingStatus, 'PENDING_SETUP_APPROVAL');
   assert.equal(health.approvedSetupCount, 0);
   assert.equal(health.approvedOpenTrades, 1);
   assert.equal(health.approvedClosedTrades, 1);
@@ -454,7 +459,7 @@ test('daily paper check output summarizes empty day one state', () => {
   const output = formatDailyPaperCheck({
     storageAuthority: 'AUTHORITATIVE',
     storageDurable: true,
-    currentDay: 1,
+    currentDay: 0,
     minimumDays: 28,
     daysElapsed: 0,
     daysRemaining: 28,
@@ -475,7 +480,8 @@ test('daily paper check output summarizes empty day one state', () => {
   assert.match(output, /Storage: AUTHORITATIVE/);
   assert.match(output, /Active Strategy: v1\.1-atr-risk/);
   assert.match(output, /Risk Model: ATR-based TP\/SL/);
-  assert.match(output, /Paper Day: 1 \/ 28/);
+  assert.match(output, /Official Paper Status: PENDING_SETUP_APPROVAL/);
+  assert.match(output, /Paper Day: 0 \/ 28/);
   assert.match(output, /Approved Closed Trades: 0 \/ 30/);
   assert.match(output, /Verdict: NOT READY/);
   assert.match(output, /Run npm run proof:snapshot/);
@@ -570,7 +576,8 @@ test('weekly audit markdown includes anomalies and next action', () => {
     dateRange: { from: '2026-04-24', to: '2026-04-30' },
     storage: { authority: 'AUTHORITATIVE' },
     ...activeStrategy,
-    officialPaperTrackingStartDate: '2026-04-30',
+    officialPaperTrackingStartDate: null,
+    officialPaperTrackingStatus: 'PENDING_SETUP_APPROVAL',
     daysElapsed: 0,
     daysRemaining: 28,
     minimumDays: 28,

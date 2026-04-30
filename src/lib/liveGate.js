@@ -59,9 +59,11 @@ function tradeTimestamp(trade) {
 
 function isApprovedOfficialTrade(trade, { storage, activeVersion = ACTIVE_STRATEGY_VERSION }) {
   const timestamp = tradeTimestamp(trade);
+  const trackingStart = officialPaperTrackingStartTimestamp();
 
   return (
     Boolean(storage?.durable) &&
+    Number.isFinite(trackingStart) &&
     trade.strategyVersion === activeVersion &&
     trade.isApprovedPaperTrade === true &&
     trade.paperCategory === 'PAPER_ELIGIBLE' &&
@@ -70,7 +72,7 @@ function isApprovedOfficialTrade(trade, { storage, activeVersion = ACTIVE_STRATE
     trade.recordQuality !== 'INVALID' &&
     ['LONG', 'SHORT'].includes(trade.direction) &&
     Number.isFinite(timestamp) &&
-    timestamp >= officialPaperTrackingStartTimestamp()
+    timestamp >= trackingStart
   );
 }
 
@@ -85,7 +87,9 @@ function computePaperStats(trades, options = {}) {
   const wins = closed.filter((trade) => trade.status === 'WIN').length;
   const returns = closed.map((trade) => Number(trade.realizedR ?? 0)).filter(Number.isFinite);
   const sortedByTime = [...approvedTrades].sort((left, right) => (tradeTimestamp(left) ?? 0) - (tradeTimestamp(right) ?? 0));
-  const firstTimestamp = sortedByTime.length ? Math.max(tradeTimestamp(sortedByTime[0]) ?? countdown.startTimestamp, countdown.startTimestamp) : countdown.startTimestamp;
+  const firstTimestamp = sortedByTime.length && Number.isFinite(countdown.startTimestamp)
+    ? Math.max(tradeTimestamp(sortedByTime[0]) ?? countdown.startTimestamp, countdown.startTimestamp)
+    : countdown.startTimestamp;
   const lastClosedTimestamp = closed
     .map((trade) => trade.exitTimestamp ?? tradeTimestamp(trade))
     .filter(Number.isFinite)
@@ -111,6 +115,7 @@ function computePaperStats(trades, options = {}) {
     openTrades: approvedTrades.filter((trade) => trade.status === 'OPEN').length,
     durationDays: countdown.elapsedDays,
     officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
+    officialPaperTrackingStatus: countdown.officialPaperTrackingStatus,
     paperDurationElapsedDays: countdown.elapsedDays,
     paperDurationRemainingDays: countdown.remainingDays,
     paperDurationMinDays: countdown.minDays,
@@ -257,10 +262,15 @@ export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = 
   };
   const failedCriteria = [];
   const durationPassed = authoritativeDurationDays >= MIN_PAPER_DURATION_DAYS;
+  const paperTrackingStarted = Number.isFinite(baseStats.startTimestamp);
   const setupSamples = perSetupCounts(trades ?? [], { storage, activeVersion });
   const suggestedSetupWarnings = Object.entries(setupSamples)
     .filter(([, count]) => count < 50)
     .map(([setup, count]) => `SETUP_SAMPLE_LOW (${setup} ${count}/50)`);
+
+  if (!paperTrackingStarted) {
+    failedCriteria.push('PAPER_TRACKING_NOT_STARTED (PENDING_SETUP_APPROVAL)');
+  }
 
   if (stats.totalClosedTrades < MIN_CLOSED_TRADES) {
     failedCriteria.push(`MIN_CLOSED_TRADES (${stats.totalClosedTrades}/${MIN_CLOSED_TRADES})`);

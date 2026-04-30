@@ -191,7 +191,8 @@ export default function PaperTradingPage() {
           <div className="grid gap-3 p-4 text-sm text-[var(--text-secondary)] md:grid-cols-2 xl:grid-cols-4">
             <div>Version: {activeVersion ?? '--'}</div>
             <div>Risk Model: {strategy.riskModel ?? gateStats.riskModel ?? '--'}</div>
-            <div>Official Paper Day 1: {paperHealth?.officialPaperTrackingStartDate ?? gateStats.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div>Official Paper Day 1: {paperHealth?.officialPaperTrackingStartDate ?? gateStats.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}</div>
+            <div>Paper Tracking Status: {paperHealth?.officialPaperTrackingStatus ?? gateStats.officialPaperTrackingStatus ?? 'PENDING_SETUP_APPROVAL'}</div>
             <div>Current verdict: NOT READY</div>
             <div>Previous history excluded: yes</div>
             <div>Historical excluded records: {paperHealth?.excludedHistoricalCount ?? gateStats.excludedHistoricalCount ?? historicalTrades.length}</div>
@@ -206,7 +207,8 @@ export default function PaperTradingPage() {
             <div>Storage: {paperHealth?.storageAuthority ?? gate?.storage?.authority ?? 'LOCAL_ONLY'}</div>
             <div>Active Strategy Version: {paperHealth?.strategyVersion ?? gateStats.strategyVersion ?? '--'}</div>
             <div>Risk Model: {paperHealth?.riskModel ?? gateStats.riskModel ?? '--'}</div>
-            <div>Official Day 1: {paperHealth?.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div>Official Day 1: {paperHealth?.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}</div>
+            <div>Paper Tracking Status: {paperHealth?.officialPaperTrackingStatus ?? gateStats.officialPaperTrackingStatus ?? 'PENDING_SETUP_APPROVAL'}</div>
             <div>Paper Duration: {paperHealth?.daysElapsed ?? gateStats.paperDurationElapsedDays ?? 0} / {paperHealth?.minimumDays ?? gateStats.paperDurationMinDays ?? 28} days</div>
             <div>Days Remaining: {paperHealth?.daysRemaining ?? gateStats.paperDurationRemainingDays ?? 28}</div>
             <div>Approved closed trades: {paperHealth?.approvedClosedTrades ?? gateStats.approvedPaperTradesClosed ?? 0}</div>
@@ -229,7 +231,7 @@ export default function PaperTradingPage() {
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
             <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Official Day 1</div>
-            <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{gateStats.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{gateStats.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}</div>
           </div>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
             <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Paper Duration</div>

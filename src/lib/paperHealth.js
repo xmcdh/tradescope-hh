@@ -81,7 +81,9 @@ export function summarizePaperHealth({
   const rejected = activeTrades.filter((trade) => trade.paperCategory === 'REJECTED_SETUP');
   const blocked = activeTrades.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL');
   const storageInfo = storage ?? liveGate?.storage ?? {};
-  const currentDay = now.getTime() >= countdown.startTimestamp ? countdown.elapsedDays + 1 : 0;
+  const currentDay = Number.isFinite(countdown.startTimestamp) && now.getTime() >= countdown.startTimestamp
+    ? countdown.elapsedDays + 1
+    : 0;
   const lastSnapshotAt = latestIso(activeSnapshots, (snapshot) => timestampOf(snapshot.generatedAt ?? snapshot.createdAt ?? snapshot.updatedAt));
 
   return {
@@ -94,6 +96,7 @@ export function summarizePaperHealth({
     activatedAt: activeStrategy.activatedAt,
     signalLogicVersion: activeStrategy.signalLogicVersion,
     officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
+    officialPaperTrackingStatus: countdown.officialPaperTrackingStatus,
     previousPaperHistoryExcluded: historicalTrades.length > 0,
     excludedHistoricalCount: historicalTrades.length,
     excludedHistoricalSnapshotCount: snapshotList.length - activeSnapshots.length,

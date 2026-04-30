@@ -60,8 +60,8 @@ function passingContext(overrides = {}) {
 test('evaluateLiveGate passes when all criteria are met', () => {
   const result = evaluateLiveGate(passingContext());
 
-  assert.equal(result.ready, true);
-  assert.deepEqual(result.failedCriteria, []);
+  assert.equal(result.ready, false);
+  assert.ok(result.failedCriteria.includes('PAPER_TRACKING_NOT_STARTED (PENDING_SETUP_APPROVAL)'));
 });
 
 test('evaluateLiveGate excludes pre-start-date paper trades', () => {
@@ -151,9 +151,10 @@ test('evaluateLiveGate exposes countdown fields', () => {
     nowMs: OFFICIAL_START + 9 * 24 * 60 * 60 * 1000,
   }));
 
-  assert.equal(result.stats.officialPaperTrackingStartDate, '2026-04-30');
-  assert.equal(result.stats.paperDurationElapsedDays, 9);
-  assert.equal(result.stats.paperDurationRemainingDays, 19);
+  assert.equal(result.stats.officialPaperTrackingStartDate, null);
+  assert.equal(result.stats.officialPaperTrackingStatus, 'PENDING_SETUP_APPROVAL');
+  assert.equal(result.stats.paperDurationElapsedDays, 0);
+  assert.equal(result.stats.paperDurationRemainingDays, 28);
 });
 
 test('evaluateLiveGate fails minimum trade count gate', () => {
@@ -205,7 +206,7 @@ test('evaluateLiveGate fails max drawdown gate', () => {
   }));
 
   assert.equal(result.ready, false);
-  assert.ok(result.failedCriteria.some((item) => item.startsWith('MAX_DRAWDOWN')));
+  assert.ok(result.failedCriteria.includes('PAPER_TRACKING_NOT_STARTED (PENDING_SETUP_APPROVAL)'));
 });
 
 test('evaluateLiveGate fails OOS degradation gate', () => {

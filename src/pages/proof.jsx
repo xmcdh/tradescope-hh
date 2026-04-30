@@ -133,7 +133,8 @@ export default function ProofPage() {
           <div className="grid gap-3 p-4 text-sm text-[var(--text-secondary)] md:grid-cols-2 xl:grid-cols-4">
             <div>Version: {strategy.strategyVersion ?? stats.strategyVersion ?? '--'}</div>
             <div>Risk Model: {strategy.riskModel ?? stats.riskModel ?? '--'}</div>
-            <div>Official Paper Day 1: {paperHealth?.officialPaperTrackingStartDate ?? stats.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div>Official Paper Day 1: {paperHealth?.officialPaperTrackingStartDate ?? stats.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}</div>
+            <div>Paper Tracking Status: {paperHealth?.officialPaperTrackingStatus ?? stats.officialPaperTrackingStatus ?? 'PENDING_SETUP_APPROVAL'}</div>
             <div>Current verdict: NOT READY</div>
             <div>Previous history excluded: {paperHealth?.previousPaperHistoryExcluded || (stats.excludedHistoricalCount ?? 0) > 0 ? 'yes' : 'yes'}</div>
             <div>Historical excluded records: {paperHealth?.excludedHistoricalCount ?? stats.excludedHistoricalCount ?? 0}</div>
@@ -148,7 +149,8 @@ export default function ProofPage() {
             <div>Storage: {paperHealth?.storageAuthority ?? liveGate?.storage?.authority ?? 'LOCAL_ONLY'}</div>
             <div>Active Strategy Version: {paperHealth?.strategyVersion ?? stats.strategyVersion ?? '--'}</div>
             <div>Risk Model: {paperHealth?.riskModel ?? stats.riskModel ?? '--'}</div>
-            <div>Official Day 1: {paperHealth?.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div>Official Day 1: {paperHealth?.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}</div>
+            <div>Paper Tracking Status: {paperHealth?.officialPaperTrackingStatus ?? stats.officialPaperTrackingStatus ?? 'PENDING_SETUP_APPROVAL'}</div>
             <div>Paper Duration: {paperHealth?.daysElapsed ?? stats.paperDurationElapsedDays ?? 0} / {paperHealth?.minimumDays ?? stats.paperDurationMinDays ?? 28} days</div>
             <div>Days Remaining: {paperHealth?.daysRemaining ?? stats.paperDurationRemainingDays ?? 28}</div>
             <div>Approved closed trades: {paperHealth?.approvedClosedTrades ?? stats.approvedPaperTradesClosed ?? 0}</div>
@@ -172,7 +174,7 @@ export default function ProofPage() {
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
             <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Official Day 1</div>
             <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
-              {stats.officialPaperTrackingStartDate ?? '2026-04-30'}
+              {stats.officialPaperTrackingStartDate ?? 'PENDING_SETUP_APPROVAL'}
             </div>
           </div>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">

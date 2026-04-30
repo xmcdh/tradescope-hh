@@ -29,7 +29,9 @@ function buildAvoidSetup(indicators, meta) {
     longScore: 0,
     shortScore: 0,
     score: 0,
+    confidenceScore: 0,
     scoreMax: 10,
+    signalValidity: 'MARGINAL',
     confidence: { label: 'LOW' },
     scoreBreakdown: {
       total: 0,
@@ -64,6 +66,7 @@ function buildAvoidSetup(indicators, meta) {
     warnings: [AVOID_PAIR_REASON],
     stale: Boolean(indicators?.stale),
     lastUpdate: indicators?.lastUpdate ?? null,
+    blockedReason: [],
     dataValid: true,
     invalidReason: null,
     btcBias: null,
@@ -111,7 +114,9 @@ function buildUnavailableSetup(snapshot, indicators) {
     longScore: 0,
     shortScore: 0,
     score: 0,
+    confidenceScore: 0,
     scoreMax: 10,
+    signalValidity: 'BLOCKED',
     confidence: { label: 'LOW' },
     scoreBreakdown: {
       total: 0,
@@ -132,6 +137,11 @@ function buildUnavailableSetup(snapshot, indicators) {
       warnings: [reason],
     },
     warnings: [
+      reason,
+      blocked ? 'Binance/Bybit did not return valid futures JSON.' : null,
+      'Signal generation disabled for safety.',
+    ].filter(Boolean),
+    blockedReason: [
       reason,
       blocked ? 'Binance/Bybit did not return valid futures JSON.' : null,
       'Signal generation disabled for safety.',

@@ -115,6 +115,21 @@ function WarningIcon() {
   );
 }
 
+function blockedTitle(reasons) {
+  return (reasons ?? []).filter(Boolean).join('\n');
+}
+
+function BlockedBadge({ reasons }) {
+  return (
+    <span
+      title={blockedTitle(reasons)}
+      className="rounded-full border border-[var(--accent-red)]/30 bg-[var(--accent-red)]/12 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent-red)]"
+    >
+      BLOCKED
+    </span>
+  );
+}
+
 function cardHoverClass(signal) {
   if (signal === 'LONG') {
     return 'hover:shadow-[0_0_12px_rgba(0,230,118,0.15)]';
@@ -253,6 +268,7 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
   const executable = ['LONG', 'SHORT'].includes(setup?.signal);
   const waitLike = ['WAIT', 'WAIT_RETEST'].includes(setup?.signal);
   const noTrade = ['NO_TRADE', 'AVOID'].includes(setup?.signal);
+  const blocked = setup?.signalValidity === 'BLOCKED';
   const warningItems = uniqueWarnings([
     ...(setup?.warnings ?? []),
     setup?.rrWarning,
@@ -390,7 +406,11 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
       <div className="mt-3 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3 md:mt-4">
         <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] md:tracking-[0.18em]">
           <span>Score Breakdown</span>
-          <span className="font-mono text-[var(--text-primary)]">{setup?.score ?? 0}/{setup?.scoreMax ?? 10}</span>
+          {blocked ? (
+            <BlockedBadge reasons={setup?.blockedReason} />
+          ) : (
+            <span className="font-mono text-[var(--text-primary)]">{setup?.confidenceScore ?? setup?.score ?? 0}/{setup?.scoreMax ?? 10}</span>
+          )}
         </div>
         <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)] md:tracking-[0.18em]">
           <span>Regime</span>
@@ -419,7 +439,11 @@ export default function SignalCard({ symbol, snapshot, selected, onSelect, onCop
           <span className="uppercase tracking-[0.18em] text-[var(--text-muted)]">
             Tech {setup?.scoreBreakdown?.technicalTotal ?? 0} + Adj {setup?.scoreBreakdown?.adjustmentTotal ?? 0}
           </span>
-          <span className="font-mono text-[var(--text-primary)]">{setup?.score ?? 0}/{setup?.scoreMax ?? 10}</span>
+          {blocked ? (
+            <BlockedBadge reasons={setup?.blockedReason} />
+          ) : (
+            <span className="font-mono text-[var(--text-primary)]">{setup?.confidenceScore ?? setup?.score ?? 0}/{setup?.scoreMax ?? 10}</span>
+          )}
         </div>
       </div>
 

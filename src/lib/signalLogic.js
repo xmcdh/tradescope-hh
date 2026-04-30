@@ -104,6 +104,18 @@ export function getSignalModeConfig(mode) {
   return SIGNAL_MODE_CONFIG[normalizeSignalMode(mode)];
 }
 
+function classifySignalValidity(confidenceScore, blockedReason) {
+  if (blockedReason.length) {
+    return 'BLOCKED';
+  }
+
+  if (confidenceScore >= 7) {
+    return 'VALID';
+  }
+
+  return 'MARGINAL';
+}
+
 function scoreItem(key, label, points, max, passed, reason = '') {
   return { key, label, points, max, passed: Boolean(passed), reason };
 }
@@ -679,6 +691,7 @@ function buildCandidate(direction, indicators, options, marketRegime, config) {
       trend: items[0].points,
     },
     hardBlock: blocks.reasons[0] ?? null,
+    blockedReasons: blocks.reasons,
     rejectionReasons: unique([...blocks.reasons, ...blocks.waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
     waitReasons: blocks.waitReasons,
     warnings: unique([...fundingOiAdjustment.warnings, btcAdjustment.warning]),
@@ -791,6 +804,7 @@ function buildNoTradeSetupFromDataProblem(indicators, options = {}) {
     : priceOnly
       ? 'Insufficient futures candle data. Price-only fallback cannot generate futures signals.'
       : indicators?.dataError || 'Insufficient futures candle data.';
+  const blockedReason = [reason, 'Signal generation disabled for safety.'];
 
   return {
     signal: 'NO_TRADE',
@@ -799,8 +813,10 @@ function buildNoTradeSetupFromDataProblem(indicators, options = {}) {
     longScore: 0,
     shortScore: 0,
     score: 0,
+    confidenceScore: 0,
     scoreMax: SCORE_MAX,
     confidence: confidenceMeta(0),
+    signalValidity: 'BLOCKED',
     signalMode: normalizeSignalMode(options.signalMode),
     scoreBreakdown: {
       total: 0,
@@ -818,11 +834,12 @@ function buildNoTradeSetupFromDataProblem(indicators, options = {}) {
       fundingOiAdjustment: 0,
       status: 'NO_TRADE',
       hardBlock: reason,
-      warnings: [reason],
+      warnings: blockedReason,
     },
-    warnings: [reason, 'Signal generation disabled for safety.'],
-    rejectionReasons: [reason, 'Signal generation disabled for safety.'],
+    warnings: blockedReason,
+    rejectionReasons: blockedReason,
     hardBlock: reason,
+    blockedReason,
     stale: true,
     dataValid: false,
     invalidReason: indicators?.dataErrorType ?? indicators?.candleErrorType ?? 'insufficient_data',
@@ -881,6 +898,8 @@ export function buildSignalSetup(indicators, options = {}) {
   const selected = pickCandidate(longCandidate, shortCandidate);
   const finalSignal = selected.status;
   const finalScore = selected.total;
+  const blockedReason = unique(selected.blockedReasons ?? []);
+  const signalValidity = classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
   const warnings = unique([...buildSignalWarnings(indicators, selected), modeConfig.warning]);
   const executable = ['LONG', 'SHORT'].includes(finalSignal);
@@ -898,8 +917,10 @@ export function buildSignalSetup(indicators, options = {}) {
     longScore: longCandidate.total,
     shortScore: shortCandidate.total,
     score: finalScore,
+    confidenceScore: finalScore,
     scoreMax: SCORE_MAX,
     confidence: meta,
+    signalValidity,
     signalMode,
     signalModeLabel: modeConfig.label,
     signalModeWarning: modeConfig.warning,
@@ -923,6 +944,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     hardBlock: selected.hardBlock,
+    blockedReason,
     rrWarning:
       Number.isFinite(selected.levels.rrTp1) && selected.levels.rrTp1 < 1.2
         ? `R:R to TP1 is only ${selected.levels.rrTp1.toFixed(2)}:1.`

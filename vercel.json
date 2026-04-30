@@ -1,6 +1,24 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["sin1"],
+  "rewrites": [
+    {
+      "source": "/performance",
+      "destination": "/"
+    },
+    {
+      "source": "/paper-trading",
+      "destination": "/"
+    },
+    {
+      "source": "/proof",
+      "destination": "/"
+    },
+    {
+      "source": "/validation",
+      "destination": "/"
+    }
+  ],
   "functions": {
     "api/*.js": {
       "regions": ["sin1"]

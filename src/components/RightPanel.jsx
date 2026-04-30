@@ -75,11 +75,27 @@ function AdjustmentRows({ setup }) {
   ));
 }
 
+function blockedTitle(reasons) {
+  return (reasons ?? []).filter(Boolean).join('\n');
+}
+
+function BlockedBadge({ reasons }) {
+  return (
+    <span
+      title={blockedTitle(reasons)}
+      className="rounded-md border border-[var(--accent-red)]/30 bg-[var(--accent-red)]/12 px-3 py-1 font-mono text-[11px] font-semibold text-[var(--accent-red)]"
+    >
+      BLOCKED
+    </span>
+  );
+}
+
 export default function RightPanel({ open, selectedSymbol, snapshot, history, onClose, onCopyAction, debugMode = false }) {
   const [feedback, setFeedback] = useState('');
   const executable = ['LONG', 'SHORT'].includes(snapshot?.setup?.signal);
   const waitLike = ['WAIT', 'WAIT_RETEST'].includes(snapshot?.setup?.signal);
   const noTrade = ['NO_TRADE', 'AVOID'].includes(snapshot?.setup?.signal);
+  const blocked = snapshot?.setup?.signalValidity === 'BLOCKED';
 
   const metrics = useMemo(() => {
     if (!snapshot?.setup || !snapshot?.indicators) {
@@ -236,18 +252,25 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
             </div>
 
             <div className="mt-4">
-              <IndicatorRail
-                label="Confidence"
-                value={`${snapshot?.setup?.score ?? 0}/${snapshot?.setup?.scoreMax ?? 10}`}
-                width={`${((snapshot?.setup?.score ?? 0) / (snapshot?.setup?.scoreMax ?? 10)) * 100}%`}
-                color={
-                  snapshot?.setup?.signal === 'LONG'
-                    ? '#00e676'
-                    : snapshot?.setup?.signal === 'SHORT'
-                      ? '#ff1744'
-                      : '#ffc400'
-                }
-              />
+              {blocked ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-[var(--text-muted)]">Confidence</div>
+                  <BlockedBadge reasons={snapshot?.setup?.blockedReason} />
+                </div>
+              ) : (
+                <IndicatorRail
+                  label="Confidence"
+                  value={`${snapshot?.setup?.confidenceScore ?? snapshot?.setup?.score ?? 0}/${snapshot?.setup?.scoreMax ?? 10}`}
+                  width={`${(((snapshot?.setup?.confidenceScore ?? snapshot?.setup?.score ?? 0) / (snapshot?.setup?.scoreMax ?? 10)) * 100)}%`}
+                  color={
+                    snapshot?.setup?.signal === 'LONG'
+                      ? '#00e676'
+                      : snapshot?.setup?.signal === 'SHORT'
+                        ? '#ff1744'
+                        : '#ffc400'
+                  }
+                />
+              )}
             </div>
 
             <div className="mt-4 rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-3">
@@ -270,7 +293,11 @@ export default function RightPanel({ open, selectedSymbol, snapshot, history, on
                 <span className="uppercase tracking-[0.18em] text-[var(--text-muted)]">
                   Tech {snapshot?.setup?.scoreBreakdown?.technicalTotal ?? 0} + Adj {snapshot?.setup?.scoreBreakdown?.adjustmentTotal ?? 0}
                 </span>
-                <span className="font-mono text-[var(--text-primary)]">{snapshot?.setup?.score ?? 0}/10</span>
+                {blocked ? (
+                  <BlockedBadge reasons={snapshot?.setup?.blockedReason} />
+                ) : (
+                  <span className="font-mono text-[var(--text-primary)]">{snapshot?.setup?.confidenceScore ?? snapshot?.setup?.score ?? 0}/10</span>
+                )}
               </div>
             </div>
 

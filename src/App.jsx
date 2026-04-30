@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import MainChart from './components/MainChart';
 import MarketDataHealth from './components/MarketDataHealth';
 import RightPanel from './components/RightPanel';
@@ -6,6 +6,9 @@ import Sidebar from './components/Sidebar';
 import SignalCard from './components/SignalCard';
 import StatsBar from './components/StatsBar';
 import TopBar from './components/TopBar';
+import PerformancePage from './pages/performance';
+import PaperTradingPage from './pages/paper-trading';
+import ProofPage from './pages/proof';
 import { useWatchlistMarketData } from './hooks/useWatchlistMarketData';
 import { useMarketDataHealth } from './hooks/useMarketDataHealth';
 import {
@@ -17,6 +20,7 @@ import {
   normalizeSymbol,
 } from './lib/marketData';
 import { normalizeSignalMode } from './lib/signalLogic';
+import { getClientTradingMode } from './lib/tradingMode';
 
 const LEGACY_WATCHLIST_KEY = 'tradescope:watchlist';
 const HISTORY_KEY = 'tradescope:history';
@@ -60,6 +64,38 @@ function formatDashboardPrice(value) {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value);
+}
+
+function uniqueStrings(items) {
+  return [...new Set((items ?? []).filter(Boolean))];
+}
+
+function annotateSetupApproval(setup, registryEntry) {
+  if (!setup) {
+    return setup;
+  }
+
+  const setupStatus = registryEntry?.setupStatus ?? 'UNKNOWN';
+  const proofStatus = registryEntry?.proofStatus ?? 'UNKNOWN';
+  let approvalNote = '';
+
+  if (setup.signalValidity === 'BLOCKED') {
+    approvalNote = 'Blocked signal cannot enter paper trading.';
+  } else if (setup.signalValidity !== 'VALID') {
+    approvalNote = `Signal validity ${setup.signalValidity ?? 'UNKNOWN'} is observation only.`;
+  } else if (setupStatus !== 'APPROVED_FOR_PAPER') {
+    approvalNote = 'Valid signal, setup not approved.';
+  }
+
+  return {
+    ...setup,
+    setupStatus,
+    proofStatus,
+    setupRecommendation: registryEntry?.recommendation ?? 'Watch only',
+    setupRejectionReason: registryEntry?.rejectionReason ?? '',
+    approvalNote,
+    warnings: uniqueStrings([...(setup.warnings ?? []), approvalNote]),
+  };
 }
 
 function PromoBanners({ selectedSymbol, snapshot, stats }) {
@@ -223,7 +259,8 @@ function loadWatchlist() {
   return base.length ? base : DEFAULT_SYMBOLS;
 }
 
-export default function App() {
+function DashboardApp() {
+  const [tradingMode, setTradingMode] = useState(getClientTradingMode());
   const [symbols, setSymbols] = useState(loadWatchlist);
   const [history, setHistory] = useState(() => loadJson(HISTORY_KEY, []));
   const [selectedSymbol, setSelectedSymbol] = useState(() => loadWatchlist()[0] ?? DEFAULT_SYMBOLS[0]);
@@ -234,6 +271,8 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [lastUpdated, setLastUpdated] = useState(displayClock());
+  const [setupRegistryLookup, setSetupRegistryLookup] = useState({});
+  const lastLoggedRef = useRef({});
   const marketSnapshots = useWatchlistMarketData(symbols, timeframe, signalMode);
   const marketDataHealth = useMarketDataHealth();
 
@@ -267,6 +306,122 @@ export default function App() {
       setSelectedSymbol(symbols[0] ?? DEFAULT_SYMBOLS[0]);
     }
   }, [selectedSymbol, symbols]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetch('/api/trading-mode')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!cancelled && payload?.tradingMode) {
+          setTradingMode(payload.tradingMode);
+        }
+      })
+      .catch(() => {});
+
+    const loadRegistry = () => {
+      fetch('/api/proof')
+        .then((response) => (response.ok ? response.json() : null))
+        .then((payload) => {
+          if (!cancelled) {
+            setSetupRegistryLookup(payload?.setupRegistry?.bySymbolKey ?? {});
+          }
+        })
+        .catch(() => {});
+    };
+
+    loadRegistry();
+    const registryIntervalId = window.setInterval(loadRegistry, 30000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(registryIntervalId);
+    };
+  }, []);
+
+  const annotatedSnapshots = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(marketSnapshots).map(([symbol, snapshot]) => {
+          const setup = snapshot?.setup;
+          const registryEntry = setupRegistryLookup?.[`${symbol}:${snapshot?.timeframe?.toLowerCase?.() ?? snapshot?.timeframe ?? ''}`] ?? null;
+
+          return [
+            symbol,
+            setup
+              ? {
+                  ...snapshot,
+                  setup: annotateSetupApproval(setup, registryEntry),
+                }
+              : snapshot,
+          ];
+        }),
+      ),
+    [marketSnapshots, setupRegistryLookup],
+  );
+
+  useEffect(() => {
+    Object.values(annotatedSnapshots).forEach((snapshot) => {
+      if (!snapshot?.symbol || !snapshot?.candles?.length || !snapshot?.setup) {
+        return;
+      }
+
+      const lastCandleTime = snapshot.candles[snapshot.candles.length - 1]?.time ?? 0;
+      const dedupeKey = `${snapshot.symbol}:${snapshot.timeframe}:${lastCandleTime}:${snapshot.setup.signal}`;
+      if (lastLoggedRef.current[snapshot.symbol] === dedupeKey) {
+        return;
+      }
+
+      lastLoggedRef.current[snapshot.symbol] = dedupeKey;
+
+      fetch('/api/signal-log', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          pair: snapshot.symbol,
+          timeframe: snapshot.timeframe,
+          setup: snapshot.setup,
+          candles: snapshot.candles,
+        }),
+      }).catch(() => {});
+
+      if (tradingMode === 'paper') {
+        fetch('/api/paper-trading', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            pair: snapshot.symbol,
+            timeframe: snapshot.timeframe,
+            setup: snapshot.setup,
+            candles: snapshot.candles,
+          }),
+        }).catch(() => {});
+      }
+
+      if (tradingMode === 'live' && ['LONG', 'SHORT'].includes(snapshot.setup.signal)) {
+        if (snapshot.setup.signalValidity !== 'VALID' || snapshot.setup.setupStatus !== 'APPROVED_FOR_PAPER') {
+          return;
+        }
+
+        fetch('/api/live-execution', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            pair: snapshot.symbol,
+            timeframe: snapshot.timeframe,
+            setup: snapshot.setup,
+            candles: snapshot.candles,
+          }),
+        }).catch(() => {});
+      }
+    });
+  }, [annotatedSnapshots, tradingMode]);
 
   function addSymbol(symbol) {
     setSymbols((current) => {
@@ -336,7 +491,7 @@ export default function App() {
     () =>
       symbols
         .map((symbol) => {
-          const snapshot = marketSnapshots[symbol];
+          const snapshot = annotatedSnapshots[symbol];
           return {
             symbol,
             price: snapshot?.indicators?.price ?? null,
@@ -344,11 +499,11 @@ export default function App() {
           };
         })
         .filter((item) => item.price !== null),
-    [marketSnapshots, symbols],
+    [annotatedSnapshots, symbols],
   );
 
   const stats = useMemo(() => {
-    const snapshotList = Object.values(marketSnapshots);
+    const snapshotList = Object.values(annotatedSnapshots);
     const longCount = snapshotList.filter((item) => item?.setup?.signal === 'LONG').length;
     const shortCount = snapshotList.filter((item) => item?.setup?.signal === 'SHORT').length;
     const activeSignals = longCount + shortCount;
@@ -362,9 +517,9 @@ export default function App() {
       pairsMonitored: symbols.length,
       lastUpdated,
     };
-  }, [lastUpdated, marketSnapshots, symbols.length]);
+  }, [annotatedSnapshots, lastUpdated, symbols.length]);
 
-  const selectedSnapshot = marketSnapshots[selectedSymbol];
+  const selectedSnapshot = annotatedSnapshots[selectedSymbol];
 
   return (
     <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[var(--bg-primary)] text-[var(--text-primary)]">
@@ -411,7 +566,7 @@ export default function App() {
                 <SignalCard
                   key={symbol}
                   symbol={symbol}
-                  snapshot={marketSnapshots[symbol]}
+                  snapshot={annotatedSnapshots[symbol]}
                   selected={selectedSymbol === symbol}
                   debugMode={debugMode}
                   onSelect={(nextSymbol) => {
@@ -434,7 +589,7 @@ export default function App() {
 
             <PairsTable
               symbols={filteredSymbols}
-              snapshots={marketSnapshots}
+              snapshots={annotatedSnapshots}
               selectedSymbol={selectedSymbol}
               onSelect={(symbol) => {
                 setSelectedSymbol(symbol);
@@ -456,4 +611,28 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+export default function App() {
+  const [pathname, setPathname] = useState(() => window.location.pathname);
+
+  useEffect(() => {
+    const onPopState = () => setPathname(window.location.pathname);
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  if (pathname === '/performance') {
+    return <PerformancePage />;
+  }
+
+  if (pathname === '/paper-trading') {
+    return <PaperTradingPage />;
+  }
+
+  if (pathname === '/proof' || pathname === '/validation') {
+    return <ProofPage />;
+  }
+
+  return <DashboardApp />;
 }

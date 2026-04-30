@@ -1,3 +1,11 @@
 node_modules
 dist
+backtest-results
+data/signal-log.json
+data/paper-trades.json
+data/proof-snapshots.json
+data/setup-approvals.json
+.env
+.env.local
+.env.*.local
 .DS_Store

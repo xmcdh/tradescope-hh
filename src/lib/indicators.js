@@ -51,6 +51,14 @@ function timeframeMs(timeframe) {
   return TIMEFRAME_MS[timeframe] ?? TIMEFRAME_MS['15m'];
 }
 
+function percentDiff(left, right) {
+  if (!Number.isFinite(left) || !Number.isFinite(right) || right === 0) {
+    return Infinity;
+  }
+
+  return Math.abs(((left - right) / right) * 100);
+}
+
 export function calculateChangePercent(candles, periodsBack = 96) {
   if (!candles?.length) {
     return null;
@@ -152,6 +160,129 @@ function isStrictlyRising(values) {
 
 function isStrictlyFalling(values) {
   return values.length >= 3 && values.every((value, index) => index === 0 || value < values[index - 1]);
+}
+
+function aggregateCandles(candles, bucketSeconds) {
+  const buckets = new Map();
+
+  candles.forEach((candle) => {
+    const bucket = Math.floor(candle.time / bucketSeconds) * bucketSeconds;
+    const current = buckets.get(bucket);
+
+    if (!current) {
+      buckets.set(bucket, { ...candle, time: bucket });
+      return;
+    }
+
+    current.high = Math.max(current.high, candle.high);
+    current.low = Math.min(current.low, candle.low);
+    current.close = candle.close;
+    current.volume += candle.volume;
+  });
+
+  return Array.from(buckets.values()).sort((left, right) => left.time - right.time);
+}
+
+function buildPivotLevels(candles, lookback = 50, thresholdPercent = 0.6) {
+  const window = candles.slice(-lookback);
+  if (window.length < 6) {
+    return {
+      support: null,
+      resistance: null,
+      swingHighs: [],
+      swingLows: [],
+    };
+  }
+
+  const pivots = [];
+  let direction = 0;
+  let extremeHigh = { price: window[0].high, time: window[0].time };
+  let extremeLow = { price: window[0].low, time: window[0].time };
+
+  for (const candle of window.slice(1)) {
+    if (candle.high > extremeHigh.price) {
+      extremeHigh = { price: candle.high, time: candle.time };
+    }
+
+    if (candle.low < extremeLow.price) {
+      extremeLow = { price: candle.low, time: candle.time };
+    }
+
+    if (direction >= 0) {
+      const drawdown = percentDiff(candle.low, extremeHigh.price);
+      if (drawdown >= thresholdPercent) {
+        pivots.push({ type: 'high', ...extremeHigh });
+        direction = -1;
+        extremeLow = { price: candle.low, time: candle.time };
+      }
+    }
+
+    if (direction <= 0) {
+      const rebound = percentDiff(candle.high, extremeLow.price);
+      if (rebound >= thresholdPercent) {
+        pivots.push({ type: 'low', ...extremeLow });
+        direction = 1;
+        extremeHigh = { price: candle.high, time: candle.time };
+      }
+    }
+  }
+
+  const swingHighs = pivots.filter((pivot) => pivot.type === 'high').map((pivot) => pivot.price);
+  const swingLows = pivots.filter((pivot) => pivot.type === 'low').map((pivot) => pivot.price);
+
+  return {
+    support: swingLows.at(-1) ?? null,
+    resistance: swingHighs.at(-1) ?? null,
+    swingHighs,
+    swingLows,
+  };
+}
+
+function resolveSupportResistance(candles, timeframe) {
+  const recentWindow = candles.slice(-20);
+  const previousRecentWindow = recentWindow.slice(0, -1);
+  const simpleSupport = Math.min(...recentWindow.map((candle) => candle.low));
+  const simpleResistance = Math.max(...recentWindow.map((candle) => candle.high));
+  const previousSupport = Math.min(...previousRecentWindow.map((candle) => candle.low));
+  const previousResistance = Math.max(...previousRecentWindow.map((candle) => candle.high));
+  const pivot = buildPivotLevels(candles, 50, 0.6);
+
+  let support = Number.isFinite(pivot.support) ? pivot.support : simpleSupport;
+  let resistance = Number.isFinite(pivot.resistance) ? pivot.resistance : simpleResistance;
+  let supportStrength = Number.isFinite(pivot.support) ? 'pivot' : 'simple';
+  let resistanceStrength = Number.isFinite(pivot.resistance) ? 'pivot' : 'simple';
+  let htfConfluence = null;
+
+  if (timeframe === '1h') {
+    const fourHourCandles = aggregateCandles(candles, 4 * 60 * 60);
+    const higherTimeframe = buildPivotLevels(fourHourCandles, 50, 0.6);
+
+    if (Number.isFinite(higherTimeframe.support) && percentDiff(higherTimeframe.support, support) <= 0.3) {
+      support = higherTimeframe.support;
+      supportStrength = 'strong';
+      htfConfluence = { ...(htfConfluence ?? {}), support: higherTimeframe.support };
+    }
+
+    if (Number.isFinite(higherTimeframe.resistance) && percentDiff(higherTimeframe.resistance, resistance) <= 0.3) {
+      resistance = higherTimeframe.resistance;
+      resistanceStrength = 'strong';
+      htfConfluence = { ...(htfConfluence ?? {}), resistance: higherTimeframe.resistance };
+    }
+  }
+
+  return {
+    support,
+    resistance,
+    previousSupport,
+    previousResistance,
+    simpleSupport,
+    simpleResistance,
+    pivotSupport: pivot.support,
+    pivotResistance: pivot.resistance,
+    supportStrength,
+    resistanceStrength,
+    htfConfluence,
+  };
 }
 
 function detectBos(candles, swingHighPoints, swingLowPoints) {
@@ -321,14 +452,10 @@ export function calculateIndicators(candles, timeframe = '15m') {
   const macd = macdSeries.length ? macdSeries[macdSeries.length - 1] : null;
 
   const recentWindow = candles.slice(-20);
-  const previousRecentWindow = recentWindow.slice(0, -1);
   const recentVolumes = recentWindow.map((candle) => candle.volume);
   const currentVolume = recentVolumes[recentVolumes.length - 1] ?? 0;
   const averageVolume = average(recentVolumes.slice(0, -1));
-  const support = Math.min(...recentWindow.map((candle) => candle.low));
-  const resistance = Math.max(...recentWindow.map((candle) => candle.high));
-  const previousSupport = Math.min(...previousRecentWindow.map((candle) => candle.low));
-  const previousResistance = Math.max(...previousRecentWindow.map((candle) => candle.high));
+  const supportLevels = resolveSupportResistance(candles, timeframe);
   const lastCandle = candles[candles.length - 1];
   const previousCandle = candles[candles.length - 2];
   const price = lastCandle?.close ?? null;
@@ -362,10 +489,17 @@ export function calculateIndicators(candles, timeframe = '15m') {
     volumeSpike: averageVolume > 0 ? currentVolume > averageVolume * 1.5 : false,
     currentVolume,
     averageVolume,
-    support,
-    resistance,
-    previousSupport,
-    previousResistance,
+    support: supportLevels.support,
+    resistance: supportLevels.resistance,
+    previousSupport: supportLevels.previousSupport,
+    previousResistance: supportLevels.previousResistance,
+    simpleSupport: supportLevels.simpleSupport,
+    simpleResistance: supportLevels.simpleResistance,
+    pivotSupport: supportLevels.pivotSupport,
+    pivotResistance: supportLevels.pivotResistance,
+    supportStrength: supportLevels.supportStrength,
+    resistanceStrength: supportLevels.resistanceStrength,
+    htfConfluence: supportLevels.htfConfluence,
     recentCandles: candles.slice(-20),
     latestHigh: highs[highs.length - 1] ?? null,
     latestLow: lows[lows.length - 1] ?? null,

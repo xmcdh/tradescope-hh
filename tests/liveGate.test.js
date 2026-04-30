@@ -121,6 +121,18 @@ test('evaluateLiveGate excludes blocked signals', () => {
   assert.equal(result.stats.blockedSignalCount, 30);
 });
 
+test('evaluateLiveGate excludes invalid approved-looking records', () => {
+  const result = evaluateLiveGate(passingContext({
+    trades: makeTrades({ count: 30, wins: 18 }).map((trade) => ({
+      ...trade,
+      recordQuality: 'INVALID',
+    })),
+  }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.ok(result.failedCriteria.some((item) => item.startsWith('MIN_CLOSED_TRADES')));
+});
+
 test('evaluateLiveGate excludes approved-looking trades when storage is non-durable', () => {
   const result = evaluateLiveGate(passingContext({
     storage: { durable: false, warning: 'Storage is using /tmp fallback.' },
@@ -146,6 +158,22 @@ test('evaluateLiveGate fails minimum trade count gate', () => {
   }));
 
   assert.equal(result.ready, false);
+  assert.ok(result.failedCriteria.some((item) => item.startsWith('MIN_CLOSED_TRADES')));
+});
+
+test('evaluateLiveGate fails with zero closed trades', () => {
+  const result = evaluateLiveGate(passingContext({
+    trades: makeTrades({ count: 30, wins: 18 }).map((trade) => ({
+      ...trade,
+      status: 'OPEN',
+      realizedR: null,
+      rResult: null,
+      exitTimestamp: null,
+    })),
+  }));
+
+  assert.equal(result.ready, false);
+  assert.equal(result.stats.totalClosedTrades, 0);
   assert.ok(result.failedCriteria.some((item) => item.startsWith('MIN_CLOSED_TRADES')));
 });
 

@@ -64,6 +64,7 @@ function isApprovedOfficialTrade(trade, { storage }) {
     trade.paperCategory === 'PAPER_ELIGIBLE' &&
     trade.signalValidity === 'VALID' &&
     trade.setupStatus === 'APPROVED_FOR_PAPER' &&
+    trade.recordQuality !== 'INVALID' &&
     ['LONG', 'SHORT'].includes(trade.direction) &&
     Number.isFinite(timestamp) &&
     timestamp >= officialPaperTrackingStartTimestamp()

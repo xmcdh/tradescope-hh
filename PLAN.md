@@ -280,3 +280,14 @@ Global verdict remains NOT READY until:
 - backtest proof / OOS / walk-forward gates remain valid
 
 Live execution remains stubbed.
+
+### Daily Operator Routine
+
+- Check `/api/storage-status`
+- Check `/api/paper-health`
+- Open `/proof`
+- Run `npm run proof:snapshot`
+- Run `npm run paper:report`
+- Confirm live execution remains stubbed
+
+Authoritative paper tracking only counts approved durable trades after 2026-04-30. Observation-only, rejected, blocked, marginal, local-json, and pre-authoritative records do not count toward the 28-day live-readiness gate.

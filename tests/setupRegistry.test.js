@@ -7,7 +7,7 @@ import {
   SETUP_STATUS,
   PAPER_CATEGORY,
 } from '../src/lib/setupRegistry.js';
-import { createPaperTradeRecord } from '../src/lib/paperTrader.js';
+import { createPaperTradeRecord, validatePaperTradeRecord } from '../src/lib/paperTrader.js';
 
 function summaryWithSetups(setups) {
   return {
@@ -136,4 +136,53 @@ test('paper trade records include setup approval fields', () => {
   assert.equal(record.proofStatus, 'PROVEN_READY_FOR_PAPER');
   assert.equal(record.isApprovedPaperTrade, true);
   assert.equal(record.paperCategory, PAPER_CATEGORY.PAPER_ELIGIBLE);
+  assert.equal(record.recordQuality, 'VALID');
+});
+
+test('invalid paper trade cannot remain approved', () => {
+  const record = createPaperTradeRecord({
+    pair: 'BTCUSDT',
+    timeframe: '1h',
+    setup: {
+      signal: 'LONG',
+      selectedDirection: 'LONG',
+      signalValidity: 'VALID',
+      confidenceScore: 8,
+      sl: null,
+      tp1: null,
+      rr: 2,
+    },
+    candles: [{ time: 1_700_000_000, close: 100, high: 101, low: 99 }],
+    registryEntry: {
+      setupStatus: SETUP_STATUS.APPROVED_FOR_PAPER,
+      proofStatus: 'PROVEN_READY_FOR_PAPER',
+      rejectionReason: '',
+    },
+  });
+
+  assert.equal(record.isApprovedPaperTrade, false);
+  assert.equal(record.recordQuality, 'INVALID');
+  assert.ok(record.recordIssues.includes('MISSING_stopLoss'));
+  assert.ok(record.recordIssues.includes('MISSING_takeProfit'));
+});
+
+test('paper trade validation rejects approved blocked or rejected setup records', () => {
+  const result = validatePaperTradeRecord({
+    pair: 'SOLUSDT',
+    timeframe: '15m',
+    direction: 'LONG',
+    signalValidity: 'BLOCKED',
+    setupStatus: SETUP_STATUS.REJECTED_OOS_FAILURE,
+    proofStatus: 'FAILED_OOS',
+    paperCategory: PAPER_CATEGORY.PAPER_ELIGIBLE,
+    isApprovedPaperTrade: true,
+    openedAt: '2026-04-30T00:00:00.000Z',
+    entry: 100,
+    stopLoss: 98,
+    takeProfit: 104,
+  });
+
+  assert.equal(result.valid, false);
+  assert.ok(result.issues.includes('BLOCKED_APPROVED'));
+  assert.ok(result.issues.includes('REJECTED_SETUP_APPROVED'));
 });

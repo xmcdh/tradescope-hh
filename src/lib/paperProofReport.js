@@ -1,7 +1,8 @@
 import { OFFICIAL_PAPER_SETUPS, calculatePaperTrackingCountdown } from '../config/paperTrackingConfig.js';
 import { loadLiveGate } from './liveGate.js';
+import { summarizePaperHealth } from './paperHealth.js';
 import { readPaperTrades } from './paperTrader.js';
-import { writeProofSnapshot } from './storageAdapter.js';
+import { readProofSnapshots, writeProofSnapshot } from './storageAdapter.js';
 
 function round(value, digits = 4) {
   return Number.isFinite(value) ? Number(value.toFixed(digits)) : 0;
@@ -25,24 +26,39 @@ function summarizeCategory(trades, predicate) {
 
 export async function buildPaperProofReport({ now = new Date() } = {}) {
   const trades = await readPaperTrades();
+  const snapshots = await readProofSnapshots();
   const liveGate = await loadLiveGate();
   const countdown = calculatePaperTrackingCountdown(now.getTime());
+  const snapshotDate = now.toISOString().slice(0, 10);
+  const snapshotId = `daily-paper-proof:${snapshotDate}`;
   const approved = summarizeCategory(
     trades,
     (trade) =>
       trade.isApprovedPaperTrade === true &&
       trade.paperCategory === 'PAPER_ELIGIBLE' &&
       trade.signalValidity === 'VALID' &&
-      trade.setupStatus === 'APPROVED_FOR_PAPER',
+      trade.setupStatus === 'APPROVED_FOR_PAPER' &&
+      trade.recordQuality !== 'INVALID',
   );
   const observationOnly = summarizeCategory(trades, (trade) => trade.paperCategory === 'OBSERVATION_ONLY');
   const rejected = summarizeCategory(trades, (trade) => trade.paperCategory === 'REJECTED_SETUP');
   const blocked = summarizeCategory(trades, (trade) => trade.paperCategory === 'BLOCKED_SIGNAL');
 
   return {
+    snapshotId,
+    snapshotDate,
+    source: 'manual',
     generatedAt: now.toISOString(),
+    currentDate: snapshotDate,
     officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
     countdown,
+    paperHealth: summarizePaperHealth({
+      trades,
+      snapshots,
+      liveGate,
+      storage: liveGate.storage,
+      now,
+    }),
     storage: liveGate.storage,
     eligibleSetups: OFFICIAL_PAPER_SETUPS,
     approvedOnlyMetrics: {
@@ -64,6 +80,10 @@ export async function buildPaperProofReport({ now = new Date() } = {}) {
     liveGate,
     finalVerdict: 'NOT READY',
     whyNotReady: liveGate.failedCriteria,
+    nextRequiredMilestone:
+      countdown.remainingDays > 0
+        ? `Complete ${countdown.remainingDays} more day(s) of authoritative approved-only paper tracking.`
+        : 'Meet minimum closed trades and performance gates with authoritative approved-only paper data.',
   };
 }
 
@@ -77,8 +97,12 @@ export function paperProofReportMarkdown(report) {
     '# TradeScope Paper Trading Proof Report',
     '',
     `Generated at: ${report.generatedAt}`,
+    `Current date: ${report.currentDate ?? report.generatedAt?.slice?.(0, 10) ?? '--'}`,
+    `Snapshot ID: ${report.snapshotId ?? '--'}`,
+    `Source: ${report.source ?? 'manual'}`,
     `Official Paper Tracking Day 1: ${report.officialPaperTrackingStartDate}`,
     `Final verdict: ${report.finalVerdict}`,
+    `Next required milestone: ${report.nextRequiredMilestone ?? '--'}`,
     '',
     '## Storage Authority',
     `- Mode: ${report.storage?.mode ?? '--'}`,
@@ -103,6 +127,9 @@ export function paperProofReportMarkdown(report) {
     `- Observation-only total: ${report.categoryBreakdown.observationOnly.total}`,
     `- Rejected setup total: ${report.categoryBreakdown.rejected.total}`,
     `- Blocked signal total: ${report.categoryBreakdown.blocked.total}`,
+    `- Last approved paper trade: ${report.paperHealth?.lastApprovedPaperTradeAt ?? '--'}`,
+    `- Last observation signal: ${report.paperHealth?.lastObservationSignalAt ?? '--'}`,
+    `- Last proof snapshot: ${report.paperHealth?.lastSnapshotAt ?? '--'}`,
     '',
     '## Live Gate Checklist',
     ...failed,
@@ -114,7 +141,7 @@ export function paperProofReportMarkdown(report) {
 export async function writeDailyProofSnapshot() {
   const report = await buildPaperProofReport();
   await writeProofSnapshot({
-    id: `daily-paper-proof:${report.generatedAt.slice(0, 10)}`,
+    id: report.snapshotId,
     verdict: report.finalVerdict,
     generatedAt: report.generatedAt,
     approvedSetupCount: report.eligibleSetups.filter((setup) => setup.setupStatus === 'APPROVED_FOR_PAPER').length,
@@ -123,6 +150,8 @@ export async function writeDailyProofSnapshot() {
     storageStatus: report.storage?.code ?? 'UNKNOWN',
     sourceBatchFilename: '',
     sourceReportFilename: 'paper-results/report.json',
+    snapshotDate: report.snapshotDate,
+    source: report.source,
     payloadJson: report,
     createdAt: report.generatedAt,
     updatedAt: report.generatedAt,

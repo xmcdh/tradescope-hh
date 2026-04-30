@@ -7,6 +7,20 @@ import {
 import { classifySignalForPaper, loadSetupRegistry, lookupSetupEntry } from './setupRegistry.js';
 
 const EXPIRY_MS = 48 * 60 * 60 * 1000;
+const REQUIRED_PAPER_TRADE_FIELDS = [
+  'pair',
+  'timeframe',
+  'direction',
+  'signalValidity',
+  'setupStatus',
+  'proofStatus',
+  'paperCategory',
+  'isApprovedPaperTrade',
+  'openedAt',
+  'entry',
+  'stopLoss',
+  'takeProfit',
+];
 
 function normalizeTimestamp(value) {
   if (!Number.isFinite(value)) {
@@ -21,6 +35,61 @@ export async function readPaperTrades() {
   return Array.isArray(parsed) ? parsed : [];
 }
 
+function isMissing(value) {
+  return value == null || value === '';
+}
+
+function isRejectedSetupStatus(setupStatus) {
+  return String(setupStatus ?? '').startsWith('REJECTED') || setupStatus === 'DISABLED_MANUAL';
+}
+
+export function validatePaperTradeRecord(record, registryEntry = null) {
+  const issues = [];
+
+  REQUIRED_PAPER_TRADE_FIELDS.forEach((field) => {
+    if (isMissing(record?.[field])) {
+      issues.push(`MISSING_${field}`);
+    }
+  });
+
+  if (record?.openedAt && !Number.isFinite(Date.parse(record.openedAt))) {
+    issues.push('INVALID_openedAt');
+  }
+
+  if (record?.direction && !['LONG', 'SHORT'].includes(record.direction)) {
+    issues.push('INVALID_direction');
+  }
+
+  if (registryEntry?.setupStatus && record?.setupStatus !== registryEntry.setupStatus) {
+    issues.push('SETUP_STATUS_MISMATCH');
+  }
+
+  if (record?.signalValidity === 'BLOCKED' && record?.isApprovedPaperTrade === true) {
+    issues.push('BLOCKED_APPROVED');
+  }
+
+  if (isRejectedSetupStatus(record?.setupStatus) && record?.isApprovedPaperTrade === true) {
+    issues.push('REJECTED_SETUP_APPROVED');
+  }
+
+  if (record?.isApprovedPaperTrade === true) {
+    if (record.paperCategory !== 'PAPER_ELIGIBLE') {
+      issues.push('APPROVED_CATEGORY_MISMATCH');
+    }
+    if (record.signalValidity !== 'VALID') {
+      issues.push('APPROVED_SIGNAL_NOT_VALID');
+    }
+    if (record.setupStatus !== 'APPROVED_FOR_PAPER') {
+      issues.push('APPROVED_SETUP_NOT_APPROVED');
+    }
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+  };
+}
+
 export function createPaperTradeRecord({ pair, timeframe, setup, candles, registryEntry }) {
   const signalCandle = candles?.[candles.length - 1] ?? null;
   const timestamp = normalizeTimestamp(signalCandle?.time ?? setup?.lastUpdate ?? Date.now());
@@ -33,7 +102,7 @@ export function createPaperTradeRecord({ pair, timeframe, setup, candles, regist
     rejectionReason: registryEntry?.rejectionReason ?? setup?.setupRejectionReason ?? '',
   });
 
-  return {
+  const record = {
     id: `paper:${pair}:${timeframe}:${direction ?? setup?.signal ?? 'NONE'}:${timestamp}`,
     timestamp,
     pair,
@@ -67,6 +136,19 @@ export function createPaperTradeRecord({ pair, timeframe, setup, candles, regist
     rResult: null,
     createdAt: new Date(timestamp).toISOString(),
     updatedAt: new Date(timestamp).toISOString(),
+  };
+
+  const validation = validatePaperTradeRecord(record, registryEntry);
+  if (!validation.valid && record.isApprovedPaperTrade) {
+    record.isApprovedPaperTrade = false;
+    record.status = 'SKIPPED';
+    record.rejectionReason = validation.issues.join(' | ');
+  }
+
+  return {
+    ...record,
+    recordQuality: validation.valid ? 'VALID' : 'INVALID',
+    recordIssues: validation.issues,
   };
 }
 

@@ -5,6 +5,8 @@ import { createStorageAdapter, inspectStorageEnv } from '../src/lib/storageAdapt
 import { classifySignalForPaper, SETUP_STATUS } from '../src/lib/setupRegistry.js';
 import { inspectDatabaseSchema } from '../src/scripts/checkDatabase.js';
 import { paperProofReportMarkdown } from '../src/lib/paperProofReport.js';
+import { summarizePaperHealth } from '../src/lib/paperHealth.js';
+import liveExecutionHandler from '../api/live-execution.js';
 
 function healthyPoolFactory() {
   return {
@@ -315,6 +317,15 @@ test('paper proof report markdown includes official start and non-gate categorie
       authority: 'AUTHORITATIVE',
       durable: true,
     },
+    snapshotId: 'daily-paper-proof:2026-04-30',
+    source: 'manual',
+    currentDate: '2026-04-30',
+    nextRequiredMilestone: 'Complete 28 more day(s) of authoritative approved-only paper tracking.',
+    paperHealth: {
+      lastApprovedPaperTradeAt: null,
+      lastObservationSignalAt: '2026-04-30T01:00:00.000Z',
+      lastSnapshotAt: null,
+    },
     eligibleSetups: [
       {
         pair: 'BTC/USDT',
@@ -344,7 +355,94 @@ test('paper proof report markdown includes official start and non-gate categorie
   });
 
   assert.match(markdown, /Official Paper Tracking Day 1: 2026-04-30/);
+  assert.match(markdown, /Snapshot ID: daily-paper-proof:2026-04-30/);
+  assert.match(markdown, /Next required milestone:/);
   assert.match(markdown, /BTC\/USDT 1h: APPROVED_FOR_PAPER/);
   assert.match(markdown, /Observation-only total: 2/);
   assert.match(markdown, /Final verdict: NOT READY/);
+});
+
+test('paper health aggregates approved, observation, rejected, blocked, and snapshot timestamps', () => {
+  const health = summarizePaperHealth({
+    now: new Date('2026-05-01T00:00:00.000Z'),
+    storage: { authority: 'AUTHORITATIVE', mode: 'database', durable: true },
+    liveGate: {
+      ready: false,
+      paperGatePassed: false,
+      paperDurationPassed: false,
+      failedCriteria: ['PAPER_DURATION (1/28 days)'],
+    },
+    snapshots: [{ id: 'snap', generatedAt: '2026-04-30T23:00:00.000Z' }],
+    trades: [
+      {
+        id: 'approved-open',
+        pair: 'BTCUSDT',
+        timeframe: '1h',
+        direction: 'LONG',
+        signalValidity: 'VALID',
+        setupStatus: 'APPROVED_FOR_PAPER',
+        paperCategory: 'PAPER_ELIGIBLE',
+        isApprovedPaperTrade: true,
+        status: 'OPEN',
+        openedAt: '2026-04-30T02:00:00.000Z',
+      },
+      {
+        id: 'approved-closed',
+        pair: 'BTCUSDT',
+        timeframe: '1h',
+        direction: 'SHORT',
+        signalValidity: 'VALID',
+        setupStatus: 'APPROVED_FOR_PAPER',
+        paperCategory: 'PAPER_ELIGIBLE',
+        isApprovedPaperTrade: true,
+        status: 'WIN',
+        openedAt: '2026-04-30T03:00:00.000Z',
+      },
+      { id: 'obs', paperCategory: 'OBSERVATION_ONLY', openedAt: '2026-04-30T04:00:00.000Z' },
+      { id: 'rej', paperCategory: 'REJECTED_SETUP', openedAt: '2026-04-30T05:00:00.000Z' },
+      { id: 'block', paperCategory: 'BLOCKED_SIGNAL', openedAt: '2026-04-30T06:00:00.000Z' },
+    ],
+  });
+
+  assert.equal(health.storageAuthority, 'AUTHORITATIVE');
+  assert.equal(health.daysElapsed, 1);
+  assert.equal(health.daysRemaining, 27);
+  assert.equal(health.approvedSetupCount, 1);
+  assert.equal(health.approvedOpenTrades, 1);
+  assert.equal(health.approvedClosedTrades, 1);
+  assert.equal(health.observationOnlyCount, 1);
+  assert.equal(health.rejectedSetupCount, 1);
+  assert.equal(health.blockedSignalCount, 1);
+  assert.equal(health.lastApprovedPaperTradeAt, '2026-04-30T03:00:00.000Z');
+  assert.equal(health.lastObservationSignalAt, '2026-04-30T04:00:00.000Z');
+  assert.equal(health.lastSnapshotAt, '2026-04-30T23:00:00.000Z');
+  assert.equal(health.globalVerdict, 'NOT READY');
+});
+
+test('live execution endpoint remains stubbed', async () => {
+  const response = {
+    statusCode: 200,
+    headers: {},
+    body: null,
+    setHeader(key, value) {
+      this.headers[key] = value;
+    },
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.body = payload;
+      return this;
+    },
+    end() {
+      return this;
+    },
+  };
+
+  await liveExecutionHandler({ method: 'POST', body: { test: true } }, response);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.body.executed, false);
+  assert.match(response.body.message, /stub/i);
 });

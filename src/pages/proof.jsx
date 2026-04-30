@@ -63,6 +63,7 @@ export default function ProofPage() {
   const summary = payload?.summary;
   const proof = payload?.proof;
   const liveGate = payload?.liveGate;
+  const paperHealth = payload?.paperHealth;
   const setupRegistry = payload?.setupRegistry;
   const stats = liveGate?.stats ?? {};
 
@@ -97,6 +98,27 @@ export default function ProofPage() {
           </div>
           <div className="mt-2 text-sm text-[var(--text-secondary)]">
             Only approved setups count toward the paper gate. Observation-only signals are logged but not counted.
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)]">
+          <div className="border-b border-[var(--border-subtle)] px-4 py-3 text-sm font-semibold">Paper Tracking Health</div>
+          <div className="grid gap-3 p-4 text-sm text-[var(--text-secondary)] md:grid-cols-2 xl:grid-cols-4">
+            <div>Storage: {paperHealth?.storageAuthority ?? liveGate?.storage?.authority ?? 'LOCAL_ONLY'}</div>
+            <div>Official Day 1: {paperHealth?.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div>Paper Duration: {paperHealth?.daysElapsed ?? stats.paperDurationElapsedDays ?? 0} / {paperHealth?.minimumDays ?? stats.paperDurationMinDays ?? 28} days</div>
+            <div>Days Remaining: {paperHealth?.daysRemaining ?? stats.paperDurationRemainingDays ?? 28}</div>
+            <div>Approved closed trades: {paperHealth?.approvedClosedTrades ?? stats.approvedPaperTradesClosed ?? 0}</div>
+            <div>Approved open trades: {paperHealth?.approvedOpenTrades ?? stats.approvedPaperTradesOpen ?? 0}</div>
+            <div>Observation-only signals: {paperHealth?.observationOnlyCount ?? stats.observationOnlyCount ?? 0}</div>
+            <div>Rejected/blocked signals: {(paperHealth?.rejectedSetupCount ?? stats.rejectedSetupCount ?? 0) + (paperHealth?.blockedSignalCount ?? stats.blockedSignalCount ?? 0)}</div>
+            <div>Last approved paper trade: {paperHealth?.lastApprovedPaperTradeAt ? new Date(paperHealth.lastApprovedPaperTradeAt).toLocaleString('id-ID') : '--'}</div>
+            <div>Last proof snapshot: {paperHealth?.lastSnapshotAt ? new Date(paperHealth.lastSnapshotAt).toLocaleString('id-ID') : '--'}</div>
+            <div>Current verdict: {paperHealth?.globalVerdict ?? payload?.verdict ?? 'NOT READY'}</div>
+            <div>Eligible setup: BTC/USDT 1h only</div>
+          </div>
+          <div className="border-t border-[var(--border-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+            Collecting authoritative paper data. Only approved BTC/USDT 1h trades count right now. Observation-only and rejected setups are not counted toward live readiness.
           </div>
         </section>
 

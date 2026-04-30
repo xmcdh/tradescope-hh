@@ -1,6 +1,7 @@
 import { readPaperTrades, syncPaperTrades } from '../src/lib/paperTrader.js';
 import { computePerformanceStats } from '../src/lib/performanceStats.js';
 import { loadLiveGate } from '../src/lib/liveGate.js';
+import { loadPaperHealth } from '../src/lib/paperHealth.js';
 import { getStorageStatus } from '../src/lib/storageAdapter.js';
 
 export default async function handler(req, res) {
@@ -17,7 +18,8 @@ export default async function handler(req, res) {
     const stats = computePerformanceStats(trades);
     const gate = await loadLiveGate();
     const storage = await getStorageStatus();
-    return res.status(200).json({ trades, stats, gate, storage });
+    const paperHealth = await loadPaperHealth();
+    return res.status(200).json({ trades, stats, gate, storage, paperHealth });
   }
 
   if (req.method === 'POST') {

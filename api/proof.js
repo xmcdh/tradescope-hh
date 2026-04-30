@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadLiveGate } from '../src/lib/liveGate.js';
+import { loadPaperHealth } from '../src/lib/paperHealth.js';
 import { buildSetupRegistry } from '../src/lib/setupRegistry.js';
 
 async function readLatestBatchSummary() {
@@ -57,6 +58,7 @@ export default async function handler(_req, res) {
   try {
     const summary = await readLatestBatchSummary();
     const liveGate = await loadLiveGate();
+    const paperHealth = await loadPaperHealth();
     const proof = summary?.proof ?? null;
     const setupRegistry = buildSetupRegistry(summary);
     const verdict = deriveVerdict(proof, liveGate);
@@ -68,6 +70,7 @@ export default async function handler(_req, res) {
       setupRegistry,
       summary,
       liveGate,
+      paperHealth,
       readyForLive: verdict === 'READY FOR SMALL LIVE TEST',
       whyNotReady: [
         ...(proof?.failedCriteria ?? []),

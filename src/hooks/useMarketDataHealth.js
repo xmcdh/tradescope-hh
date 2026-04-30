@@ -10,12 +10,12 @@ function marketDataPath(provider, type, extra = '') {
 }
 
 const ENDPOINTS = [
-  { key: 'binance-klines', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Klines', path: marketDataPath('binance', 'klines', '&interval=15m&limit=5'), signalCritical: true },
-  { key: 'binance-ticker', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Ticker', path: marketDataPath('binance', 'ticker') },
-  { key: 'binance-funding', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Funding', path: marketDataPath('binance', 'funding') },
-  { key: 'binance-oi', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Open Interest', path: marketDataPath('binance', 'openinterest') },
-  { key: 'bybit-klines', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Klines', path: marketDataPath('bybit', 'klines', '&interval=15m&limit=5'), signalCritical: true },
-  { key: 'bybit-ticker', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Ticker', path: marketDataPath('bybit', 'ticker') },
+  { key: 'binance-klines', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Klines', path: marketDataPath('binance', 'klines', '&interval=15m&limit=5'), required: true, signalCritical: true },
+  { key: 'binance-ticker', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Ticker', path: marketDataPath('binance', 'ticker'), required: true },
+  { key: 'binance-funding', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Funding', path: marketDataPath('binance', 'funding'), required: true },
+  { key: 'binance-oi', source: 'Binance Futures', sourceId: 'binance_futures', endpoint: 'Open Interest', path: marketDataPath('binance', 'openinterest'), required: true },
+  { key: 'bybit-klines', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Klines', path: marketDataPath('bybit', 'klines', '&interval=15m&limit=5'), required: false, optionalLabel: 'Optional Provider' },
+  { key: 'bybit-ticker', source: 'Bybit', sourceId: 'bybit_futures', endpoint: 'Ticker', path: marketDataPath('bybit', 'ticker'), required: false, optionalLabel: 'Optional Provider' },
 ];
 
 function statusFromErrorType(errorType) {
@@ -146,28 +146,31 @@ export function useMarketDataHealth() {
   }, []);
 
   return useMemo(() => {
-    const successful = rows.filter((row) => row.status === 'OK');
-    const signalSource = rows.find((row) => row.signalCritical && row.status === 'OK');
-    const lastSuccessfulUpdate = successful
+    const requiredRows = rows.filter((row) => row.required);
+    const successfulRequired = requiredRows.filter((row) => row.status === 'OK');
+    const signalSource = requiredRows.find((row) => row.signalCritical && row.status === 'OK');
+    const lastSuccessfulUpdate = successfulRequired
       .map((row) => row.lastSuccessAt)
       .filter(Boolean)
       .sort((left, right) => right - left)[0] ?? null;
     const signalAllowed = Boolean(signalSource);
-    const allFailed = rows.length > 0 && rows.every((row) => row.status !== 'OK');
+    const allFailed = requiredRows.length > 0 && requiredRows.every((row) => row.status !== 'OK');
+    const requiredHealthy = requiredRows.length > 0 && requiredRows.every((row) => row.status === 'OK');
 
     return {
       rows,
       summary: {
-        activeDataSource: signalSource?.source ?? successful[0]?.source ?? 'None',
+        activeDataSource: signalSource?.source ?? successfulRequired[0]?.source ?? 'None',
         lastSuccessfulUpdate,
-        freshnessStatus: signalAllowed ? 'Fresh futures candles available' : 'Market data unavailable',
+        freshnessStatus: signalAllowed ? 'Fresh Binance futures candles available' : 'Required Binance market data unavailable',
         signalAllowed,
+        requiredHealthy,
         allFailed,
         message: allFailed
-          ? 'Market data unavailable. Signals disabled until fresh futures data is restored.'
+          ? 'Required Binance market data unavailable. Signals disabled until fresh futures data is restored.'
           : signalAllowed
-            ? 'Signal generation allowed from fresh futures candles.'
-            : 'Price-only or partial data available. Signal generation disabled.',
+            ? 'Signal generation allowed from Binance futures candles.'
+            : 'Required Binance futures candles unavailable. Signal generation disabled.',
       },
     };
   }, [rows]);

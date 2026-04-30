@@ -55,3 +55,12 @@ Every provider result should include:
 - `signalAllowed`
 
 If a provider does not supply fresh futures candles, `signalAllowed` must be `false`.
+
+## Official Paper Market Data Source
+
+During the official 28-day paper tracking phase, Binance Futures is the authoritative market data source for Health Panel success, proof review, and any future live-readiness decision.
+
+- Required health checks use Binance klines, ticker, funding, and open interest.
+- Bybit remains optional/future fallback only.
+- Bybit does not affect Health Panel success, paper proof, liveGate, setup approval, strategy validation, or live readiness.
+- Official paper tracking must count only durable approved BTC/USDT 1h records from the active proof gate.

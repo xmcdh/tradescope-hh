@@ -54,7 +54,14 @@ export default function MarketDataHealth({ health }) {
           <div key={row.key} className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-primary)] px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <div className="truncate text-xs font-medium text-[var(--text-primary)]">{row.source}</div>
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <div className="truncate text-xs font-medium text-[var(--text-primary)]">{row.source}</div>
+                  {!row.required ? (
+                    <span className="rounded-full border border-[var(--border)] px-1.5 py-0.5 text-[9px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                      Optional
+                    </span>
+                  ) : null}
+                </div>
                 <div className="text-[10px] uppercase tracking-[0.18em] text-[var(--text-muted)]">{row.endpoint}</div>
               </div>
               <span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${statusTone(row.status)}`}>
@@ -76,6 +83,11 @@ export default function MarketDataHealth({ health }) {
             {row.message && row.message !== 'OK' ? (
               <div className="mt-2 max-h-10 overflow-hidden text-xs leading-5 text-[var(--text-secondary)]" title={row.message}>
                 {row.message}
+              </div>
+            ) : null}
+            {!row.required ? (
+              <div className="mt-2 text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                Not used for official paper proof or live gate.
               </div>
             ) : null}
           </div>

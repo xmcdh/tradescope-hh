@@ -5,6 +5,7 @@ import { parseArgs } from './runBacktest.js';
 import { loadLiveGate } from '../lib/liveGate.js';
 import { buildSetupRegistry } from '../lib/setupRegistry.js';
 import { getStorageStatus, writeProofSnapshot, writeSetupApproval } from '../lib/storageAdapter.js';
+import { activeStrategy } from '../config/strategyVersion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -64,11 +65,11 @@ export function deriveVerdict({ proof, liveGate }) {
   const durationPassed = liveGate?.paperDurationPassed;
   const durable = liveGate?.storage?.durable;
 
-  if (proof.status === 'PROVEN_READY_FOR_PAPER' && paperReady && durationPassed && durable) {
+  if (proof?.strategyVersion === activeStrategy.strategyVersion && proof.status === 'PROVEN_READY_FOR_PAPER' && paperReady && durationPassed && durable) {
     return 'READY FOR SMALL LIVE TEST';
   }
 
-  if (proof.status === 'PROVEN_READY_FOR_PAPER' && !paperReady) {
+  if (proof?.strategyVersion === activeStrategy.strategyVersion && proof.status === 'PROVEN_READY_FOR_PAPER' && !paperReady) {
     return 'READY FOR PAPER TRADING';
   }
 
@@ -95,6 +96,8 @@ export function toMarkdown({ sourcePath, summary, liveGate }) {
     '',
     '## Executive Summary',
     `- Final verdict: **${deriveVerdict({ proof, liveGate })}**`,
+    `- Active strategy: **${activeStrategy.strategyVersion}**`,
+    `- Risk model: **${activeStrategy.riskModel}**`,
     `- Proof status: **${proof.status}**`,
     `- Tested setups: ${summary.results.length}`,
     `- Successes / failures: ${summary.metadata.successCount} / ${summary.metadata.failureCount}`,
@@ -162,6 +165,7 @@ export async function main() {
   const storageStatus = await getStorageStatus();
   const report = {
     generatedAt: new Date().toISOString(),
+    ...activeStrategy,
     sourcePath: latest.path,
     summary: latest.payload,
     setupRegistry,
@@ -181,6 +185,10 @@ export async function main() {
   const snapshotId = `proof:${new Date(report.generatedAt).toISOString()}`;
   await writeProofSnapshot({
     id: snapshotId,
+    strategyVersion: activeStrategy.strategyVersion,
+    riskModel: activeStrategy.riskModel,
+    signalLogicVersion: activeStrategy.signalLogicVersion,
+    activatedAt: activeStrategy.activatedAt,
     verdict: report.verdict,
     generatedAt: report.generatedAt,
     approvedSetupCount: setupRegistry.counts.approved,
@@ -204,6 +212,10 @@ export async function main() {
         setupStatus: entry.setupStatus,
         recommendation: entry.recommendation,
         sourceReportId: snapshotId,
+        strategyVersion: activeStrategy.strategyVersion,
+        riskModel: activeStrategy.riskModel,
+        signalLogicVersion: activeStrategy.signalLogicVersion,
+        activatedAt: activeStrategy.activatedAt,
         createdAt: report.generatedAt,
         updatedAt: report.generatedAt,
       }),

@@ -1,3 +1,5 @@
+import { activeStrategy, strategyVersion } from '../config/strategyVersion.js';
+
 const MIN_CLOSED_TRADES = 50;
 const WIN_RATE_THRESHOLD = 45;
 const EXPECTANCY_THRESHOLD = 0.3;
@@ -14,12 +16,15 @@ function setupKey(result) {
 }
 
 function evaluateSetup(result) {
+  const resultStrategyVersion = result.metadata?.strategyVersion ?? result.strategyVersion ?? null;
   const validation = result.validation ?? {};
   const backtest = result.backtest ?? result;
   const oosDegradation = validation.comparison?.oosDegradation ?? null;
   const metrics = {
     pair: result.pair,
     timeframe: result.timeframe,
+    strategyVersion: resultStrategyVersion,
+    riskModel: result.metadata?.riskModel ?? result.riskModel ?? null,
     closedTrades: backtest.actionableClosedTradeCount ?? 0,
     actionableTrades: backtest.actionableTradeCount ?? 0,
     winRate: backtest.actionableWinRate ?? 0,
@@ -90,11 +95,13 @@ function evaluateSetup(result) {
 }
 
 export function evaluateProfitabilityProof(results, options = {}) {
-  const setups = (Array.isArray(results) ? results : []).map(evaluateSetup);
+  const activeVersion = options.strategyVersion ?? strategyVersion;
+  const inputResults = Array.isArray(results) ? results : [];
+  const setups = inputResults.map(evaluateSetup);
   const closedActionableTrades = setups.reduce((sum, item) => sum + item.metrics.closedTrades, 0);
   const netByPair = new Map();
 
-  (Array.isArray(results) ? results : []).forEach((result) => {
+  inputResults.forEach((result) => {
     const pair = result.pair;
     const netR = result.backtest?.actionableNetR ?? result.actionableNetR ?? 0;
     netByPair.set(pair, (netByPair.get(pair) ?? 0) + netR);
@@ -110,10 +117,17 @@ export function evaluateProfitabilityProof(results, options = {}) {
 
   let status = 'PROMISING_NEEDS_MORE_DATA';
   const failedCriteria = [];
+  const staleOrMissingStrategy = inputResults.filter((result) => {
+    const resultVersion = result.metadata?.strategyVersion ?? result.strategyVersion ?? null;
+    return resultVersion !== activeVersion;
+  });
 
   if (!setups.length) {
     status = 'INSUFFICIENT_SAMPLE';
     failedCriteria.push('No backtest results available.');
+  } else if (staleOrMissingStrategy.length) {
+    status = 'STALE_STRATEGY_VERSION';
+    failedCriteria.push(`Fresh backtest/OOS/walk-forward proof required for ${activeVersion}. Do not inherit v1.0 proof.`);
   } else if (failedStatuses.length) {
     status = failedStatuses[0].status;
     failedCriteria.push(...failedStatuses.flatMap((item) => [`${item.setup}: ${item.failedCriteria.join(', ')}`]));
@@ -134,6 +148,7 @@ export function evaluateProfitabilityProof(results, options = {}) {
 
   return {
     status,
+    ...activeStrategy,
     thresholds: {
       minClosedTrades: MIN_CLOSED_TRADES,
       winRate: WIN_RATE_THRESHOLD,

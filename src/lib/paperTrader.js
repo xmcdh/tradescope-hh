@@ -5,6 +5,7 @@ import {
   writePaperTrade,
 } from './storageAdapter.js';
 import { classifySignalForPaper, loadSetupRegistry, lookupSetupEntry } from './setupRegistry.js';
+import { strategyMetadata, strategyVersion } from '../config/strategyVersion.js';
 
 const EXPIRY_MS = 48 * 60 * 60 * 1000;
 const REQUIRED_PAPER_TRADE_FIELDS = [
@@ -16,6 +17,9 @@ const REQUIRED_PAPER_TRADE_FIELDS = [
   'proofStatus',
   'paperCategory',
   'isApprovedPaperTrade',
+  'strategyVersion',
+  'riskModel',
+  'activatedAt',
   'openedAt',
   'entry',
   'stopLoss',
@@ -103,10 +107,11 @@ export function createPaperTradeRecord({ pair, timeframe, setup, candles, regist
   });
 
   const record = {
-    id: `paper:${pair}:${timeframe}:${direction ?? setup?.signal ?? 'NONE'}:${timestamp}`,
+    id: `paper:${strategyVersion}:${pair}:${timeframe}:${direction ?? setup?.signal ?? 'NONE'}:${timestamp}`,
     timestamp,
     pair,
     timeframe,
+    ...strategyMetadata(),
     direction,
     signal: setup?.signal ?? 'NO_TRADE',
     entry: signalCandle?.close ?? setup?.entry1 ?? null,
@@ -229,7 +234,7 @@ export async function syncPaperTrades({ pair, timeframe, setup, candles }) {
   const registry = await loadSetupRegistry();
   const registryEntry = lookupSetupEntry(registry, pair, timeframe);
   const updates = trades
-    .filter((trade) => trade.pair === pair && trade.timeframe === timeframe)
+    .filter((trade) => trade.pair === pair && trade.timeframe === timeframe && trade.strategyVersion === strategyVersion)
     .map((trade) => ({
       id: trade.id,
       updates: settleTrade(trade, candles ?? []),

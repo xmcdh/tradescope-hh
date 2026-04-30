@@ -1,4 +1,5 @@
-import { OFFICIAL_PAPER_SETUPS, calculatePaperTrackingCountdown } from '../config/paperTrackingConfig.js';
+import { OFFICIAL_PAPER_SETUPS, calculatePaperTrackingCountdown, ACTIVE_STRATEGY_VERSION } from '../config/paperTrackingConfig.js';
+import { activeStrategy } from '../config/strategyVersion.js';
 import { loadLiveGate } from './liveGate.js';
 import { summarizePaperHealth } from './paperHealth.js';
 import { readPaperTrades } from './paperTrader.js';
@@ -34,15 +35,17 @@ export async function buildPaperProofReport({ now = new Date() } = {}) {
   const approved = summarizeCategory(
     trades,
     (trade) =>
+      trade.strategyVersion === ACTIVE_STRATEGY_VERSION &&
       trade.isApprovedPaperTrade === true &&
       trade.paperCategory === 'PAPER_ELIGIBLE' &&
       trade.signalValidity === 'VALID' &&
       trade.setupStatus === 'APPROVED_FOR_PAPER' &&
       trade.recordQuality !== 'INVALID',
   );
-  const observationOnly = summarizeCategory(trades, (trade) => trade.paperCategory === 'OBSERVATION_ONLY');
-  const rejected = summarizeCategory(trades, (trade) => trade.paperCategory === 'REJECTED_SETUP');
-  const blocked = summarizeCategory(trades, (trade) => trade.paperCategory === 'BLOCKED_SIGNAL');
+  const observationOnly = summarizeCategory(trades, (trade) => trade.strategyVersion === ACTIVE_STRATEGY_VERSION && trade.paperCategory === 'OBSERVATION_ONLY');
+  const rejected = summarizeCategory(trades, (trade) => trade.strategyVersion === ACTIVE_STRATEGY_VERSION && trade.paperCategory === 'REJECTED_SETUP');
+  const blocked = summarizeCategory(trades, (trade) => trade.strategyVersion === ACTIVE_STRATEGY_VERSION && trade.paperCategory === 'BLOCKED_SIGNAL');
+  const historical = trades.filter((trade) => trade.strategyVersion !== ACTIVE_STRATEGY_VERSION);
 
   return {
     snapshotId,
@@ -50,7 +53,10 @@ export async function buildPaperProofReport({ now = new Date() } = {}) {
     source: 'manual',
     generatedAt: now.toISOString(),
     currentDate: snapshotDate,
+    ...activeStrategy,
     officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
+    previousPaperHistoryExcluded: historical.length > 0,
+    excludedHistoricalCount: historical.length,
     countdown,
     paperHealth: summarizePaperHealth({
       trades,
@@ -76,6 +82,9 @@ export async function buildPaperProofReport({ now = new Date() } = {}) {
       observationOnly,
       rejected,
       blocked,
+      historical: {
+        total: historical.length,
+      },
     },
     liveGate,
     finalVerdict: 'NOT READY',
@@ -100,7 +109,12 @@ export function paperProofReportMarkdown(report) {
     `Current date: ${report.currentDate ?? report.generatedAt?.slice?.(0, 10) ?? '--'}`,
     `Snapshot ID: ${report.snapshotId ?? '--'}`,
     `Source: ${report.source ?? 'manual'}`,
+    `Active Strategy Version: ${report.strategyVersion ?? '--'}`,
+    `Risk Model: ${report.riskModel ?? '--'}`,
+    `Signal Logic Version: ${report.signalLogicVersion ?? '--'}`,
+    `Activated At: ${report.activatedAt ?? '--'}`,
     `Official Paper Tracking Day 1: ${report.officialPaperTrackingStartDate}`,
+    `Previous paper history excluded: ${report.previousPaperHistoryExcluded ? 'yes' : 'no'}`,
     `Final verdict: ${report.finalVerdict}`,
     `Next required milestone: ${report.nextRequiredMilestone ?? '--'}`,
     '',
@@ -127,6 +141,7 @@ export function paperProofReportMarkdown(report) {
     `- Observation-only total: ${report.categoryBreakdown.observationOnly.total}`,
     `- Rejected setup total: ${report.categoryBreakdown.rejected.total}`,
     `- Blocked signal total: ${report.categoryBreakdown.blocked.total}`,
+    `- Historical excluded total: ${report.categoryBreakdown.historical?.total ?? report.excludedHistoricalCount ?? 0}`,
     `- Last approved paper trade: ${report.paperHealth?.lastApprovedPaperTradeAt ?? '--'}`,
     `- Last observation signal: ${report.paperHealth?.lastObservationSignalAt ?? '--'}`,
     `- Last proof snapshot: ${report.paperHealth?.lastSnapshotAt ?? '--'}`,
@@ -144,6 +159,10 @@ export async function writeDailyProofSnapshot() {
   const report = await buildPaperProofReport();
   await writeProofSnapshot({
     id: report.snapshotId,
+    strategyVersion: report.strategyVersion,
+    riskModel: report.riskModel,
+    signalLogicVersion: report.signalLogicVersion,
+    activatedAt: report.activatedAt,
     verdict: report.finalVerdict,
     generatedAt: report.generatedAt,
     approvedSetupCount: report.eligibleSetups.filter((setup) => setup.setupStatus === 'APPROVED_FOR_PAPER').length,

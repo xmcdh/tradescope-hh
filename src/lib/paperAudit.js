@@ -5,7 +5,9 @@ import {
   OFFICIAL_PAPER_SETUPS,
   calculatePaperTrackingCountdown,
   officialPaperTrackingStartTimestamp,
+  ACTIVE_STRATEGY_VERSION,
 } from '../config/paperTrackingConfig.js';
+import { activeStrategy } from '../config/strategyVersion.js';
 import { loadLiveGate } from './liveGate.js';
 import { loadPaperHealth, summarizePaperHealth } from './paperHealth.js';
 import { readPaperTrades, validatePaperTradeRecord } from './paperTrader.js';
@@ -45,6 +47,7 @@ function isApprovedLooking(trade) {
 function isApprovedOfficialPaperTrade(trade) {
   return (
     trade?.isApprovedPaperTrade === true &&
+    trade?.strategyVersion === ACTIVE_STRATEGY_VERSION &&
     trade?.paperCategory === 'PAPER_ELIGIBLE' &&
     trade?.signalValidity === 'VALID' &&
     trade?.setupStatus === 'APPROVED_FOR_PAPER' &&
@@ -147,6 +150,8 @@ export function formatDailyPaperCheck(health) {
 
   return [
     `Storage: ${health.storageAuthority ?? 'LOCAL_ONLY'}`,
+    `Active Strategy: ${health.strategyVersion ?? ACTIVE_STRATEGY_VERSION}`,
+    `Risk Model: ${health.riskModel ?? activeStrategy.riskModel}`,
     `Paper Day: ${health.currentDay ?? 0} / ${health.minimumDays ?? 28}`,
     `Days Elapsed: ${health.daysElapsed ?? 0}`,
     `Days Remaining: ${health.daysRemaining ?? 28}`,
@@ -185,6 +190,8 @@ function markdownAudit(report) {
     `Generated at: ${report.generatedAt}`,
     `Date range: ${report.dateRange.from} to ${report.dateRange.to}`,
     `Storage authority: ${report.storage.authority}`,
+    `Active Strategy Version: ${report.strategyVersion}`,
+    `Risk Model: ${report.riskModel}`,
     `Official Paper Tracking Day 1: ${report.officialPaperTrackingStartDate}`,
     `Paper duration: ${report.daysElapsed} / ${report.minimumDays} days`,
     `Days remaining: ${report.daysRemaining}`,
@@ -237,6 +244,7 @@ export async function buildWeeklyPaperAudit({ now = new Date() } = {}) {
 
   return {
     generatedAt: now.toISOString(),
+    ...activeStrategy,
     dateRange: { from, to },
     storage: {
       authority: storage.authority,
@@ -246,6 +254,8 @@ export async function buildWeeklyPaperAudit({ now = new Date() } = {}) {
       durable: storage.durable,
     },
     officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
+    previousPaperHistoryExcluded: health.previousPaperHistoryExcluded,
+    excludedHistoricalCount: health.excludedHistoricalCount,
     daysElapsed: countdown.elapsedDays,
     daysRemaining: countdown.remainingDays,
     minimumDays: countdown.minDays,

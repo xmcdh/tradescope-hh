@@ -1,7 +1,9 @@
 import {
   OFFICIAL_PAPER_SETUPS,
   calculatePaperTrackingCountdown,
+  ACTIVE_STRATEGY_VERSION,
 } from '../config/paperTrackingConfig.js';
+import { activeStrategy } from '../config/strategyVersion.js';
 import { loadLiveGate } from './liveGate.js';
 import { readPaperTrades } from './paperTrader.js';
 import { readProofSnapshots } from './storageAdapter.js';
@@ -49,8 +51,9 @@ export function calculateSnapshotFreshness({ lastSnapshotAt, now = new Date() } 
   return snapshotDay === today ? 'FRESH' : 'STALE';
 }
 
-function isApprovedPaperTrade(trade) {
+function isApprovedPaperTrade(trade, activeVersion = ACTIVE_STRATEGY_VERSION) {
   return (
+    trade?.strategyVersion === activeVersion &&
     trade?.isApprovedPaperTrade === true &&
     trade?.paperCategory === 'PAPER_ELIGIBLE' &&
     trade?.signalValidity === 'VALID' &&
@@ -69,20 +72,32 @@ export function summarizePaperHealth({
 } = {}) {
   const list = Array.isArray(trades) ? trades : [];
   const snapshotList = Array.isArray(snapshots) ? snapshots : [];
+  const activeSnapshots = snapshotList.filter((snapshot) => snapshot.strategyVersion === ACTIVE_STRATEGY_VERSION);
   const countdown = calculatePaperTrackingCountdown(now.getTime());
-  const approvedTrades = list.filter(isApprovedPaperTrade);
-  const observationOnly = list.filter((trade) => trade.paperCategory === 'OBSERVATION_ONLY');
-  const rejected = list.filter((trade) => trade.paperCategory === 'REJECTED_SETUP');
-  const blocked = list.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL');
+  const activeTrades = list.filter((trade) => trade.strategyVersion === ACTIVE_STRATEGY_VERSION);
+  const historicalTrades = list.filter((trade) => trade.strategyVersion !== ACTIVE_STRATEGY_VERSION);
+  const approvedTrades = list.filter((trade) => isApprovedPaperTrade(trade));
+  const observationOnly = activeTrades.filter((trade) => trade.paperCategory === 'OBSERVATION_ONLY');
+  const rejected = activeTrades.filter((trade) => trade.paperCategory === 'REJECTED_SETUP');
+  const blocked = activeTrades.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL');
   const storageInfo = storage ?? liveGate?.storage ?? {};
   const currentDay = now.getTime() >= countdown.startTimestamp ? countdown.elapsedDays + 1 : 0;
-  const lastSnapshotAt = latestIso(snapshotList, (snapshot) => timestampOf(snapshot.generatedAt ?? snapshot.createdAt ?? snapshot.updatedAt));
+  const lastSnapshotAt = latestIso(activeSnapshots, (snapshot) => timestampOf(snapshot.generatedAt ?? snapshot.createdAt ?? snapshot.updatedAt));
 
   return {
     storageAuthority: storageInfo.authority ?? (storageInfo.durable ? 'AUTHORITATIVE' : 'LOCAL_ONLY'),
     storageMode: storageInfo.mode ?? null,
     storageDurable: Boolean(storageInfo.durable),
+    strategyVersion: ACTIVE_STRATEGY_VERSION,
+    strategyName: activeStrategy.strategyName,
+    riskModel: activeStrategy.riskModel,
+    activatedAt: activeStrategy.activatedAt,
+    signalLogicVersion: activeStrategy.signalLogicVersion,
     officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
+    previousPaperHistoryExcluded: historicalTrades.length > 0,
+    excludedHistoricalCount: historicalTrades.length,
+    excludedHistoricalSnapshotCount: snapshotList.length - activeSnapshots.length,
+    activeStrategyTradeCount: activeTrades.length,
     currentDay,
     daysElapsed: countdown.elapsedDays,
     daysRemaining: countdown.remainingDays,
@@ -104,8 +119,8 @@ export function summarizePaperHealth({
       paperDurationPassed: Boolean(liveGate?.paperDurationPassed),
       failedCriteria: liveGate?.failedCriteria ?? [],
     },
-    globalVerdict: liveGate?.ready ? 'READY FOR SMALL LIVE TEST' : 'NOT READY',
-    message: 'Collecting authoritative paper data. Only approved BTC/USDT 1h trades count right now.',
+    globalVerdict: 'NOT READY',
+    message: 'ATR TP/SL changed the active risk model. Official proof is now versioned. Old records are historical and do not count toward the current ATR proof gate.',
   };
 }
 

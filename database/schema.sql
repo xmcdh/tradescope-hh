@@ -2,6 +2,10 @@ CREATE TABLE IF NOT EXISTS signal_logs (
   id TEXT PRIMARY KEY,
   pair TEXT NOT NULL,
   timeframe TEXT NOT NULL,
+  strategy_version TEXT,
+  risk_model TEXT,
+  signal_logic_version TEXT,
+  activated_at TIMESTAMPTZ,
   direction TEXT NOT NULL,
   signal TEXT,
   signal_validity TEXT NOT NULL,
@@ -28,6 +32,10 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   id TEXT PRIMARY KEY,
   pair TEXT NOT NULL,
   timeframe TEXT NOT NULL,
+  strategy_version TEXT,
+  risk_model TEXT,
+  signal_logic_version TEXT,
+  activated_at TIMESTAMPTZ,
   direction TEXT,
   signal TEXT,
   signal_validity TEXT NOT NULL,
@@ -56,6 +64,10 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 CREATE TABLE IF NOT EXISTS proof_snapshots (
   id TEXT PRIMARY KEY,
   verdict TEXT NOT NULL,
+  strategy_version TEXT,
+  risk_model TEXT,
+  signal_logic_version TEXT,
+  activated_at TIMESTAMPTZ,
   generated_at TIMESTAMPTZ NOT NULL,
   approved_setup_count INTEGER NOT NULL DEFAULT 0,
   collecting_data_setup_count INTEGER NOT NULL DEFAULT 0,
@@ -72,6 +84,10 @@ CREATE TABLE IF NOT EXISTS setup_approvals (
   id TEXT PRIMARY KEY,
   pair TEXT NOT NULL,
   timeframe TEXT NOT NULL,
+  strategy_version TEXT,
+  risk_model TEXT,
+  signal_logic_version TEXT,
+  activated_at TIMESTAMPTZ,
   proof_status TEXT NOT NULL,
   setup_status TEXT NOT NULL,
   recommendation TEXT NOT NULL,
@@ -80,15 +96,43 @@ CREATE TABLE IF NOT EXISTS setup_approvals (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE IF EXISTS signal_logs
+  ADD COLUMN IF NOT EXISTS strategy_version TEXT,
+  ADD COLUMN IF NOT EXISTS risk_model TEXT,
+  ADD COLUMN IF NOT EXISTS signal_logic_version TEXT,
+  ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+
+ALTER TABLE IF EXISTS paper_trades
+  ADD COLUMN IF NOT EXISTS strategy_version TEXT,
+  ADD COLUMN IF NOT EXISTS risk_model TEXT,
+  ADD COLUMN IF NOT EXISTS signal_logic_version TEXT,
+  ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+
+ALTER TABLE IF EXISTS proof_snapshots
+  ADD COLUMN IF NOT EXISTS strategy_version TEXT,
+  ADD COLUMN IF NOT EXISTS risk_model TEXT,
+  ADD COLUMN IF NOT EXISTS signal_logic_version TEXT,
+  ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+
+ALTER TABLE IF EXISTS setup_approvals
+  ADD COLUMN IF NOT EXISTS strategy_version TEXT,
+  ADD COLUMN IF NOT EXISTS risk_model TEXT,
+  ADD COLUMN IF NOT EXISTS signal_logic_version TEXT,
+  ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_signal_logs_pair_timeframe ON signal_logs (pair, timeframe);
+CREATE INDEX IF NOT EXISTS idx_signal_logs_strategy_version ON signal_logs (strategy_version);
 CREATE INDEX IF NOT EXISTS idx_signal_logs_created_at ON signal_logs (created_at);
 CREATE INDEX IF NOT EXISTS idx_signal_logs_candle_timestamp ON signal_logs (candle_timestamp);
 
 CREATE INDEX IF NOT EXISTS idx_paper_trades_pair_timeframe ON paper_trades (pair, timeframe);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_strategy_version ON paper_trades (strategy_version);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades (status);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_created_at ON paper_trades (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_proof_snapshots_generated_at ON proof_snapshots (generated_at);
+CREATE INDEX IF NOT EXISTS idx_proof_snapshots_strategy_version ON proof_snapshots (strategy_version);
 
 CREATE INDEX IF NOT EXISTS idx_setup_approvals_pair_timeframe ON setup_approvals (pair, timeframe);
+CREATE INDEX IF NOT EXISTS idx_setup_approvals_strategy_version ON setup_approvals (strategy_version);
 CREATE INDEX IF NOT EXISTS idx_setup_approvals_created_at ON setup_approvals (created_at);

@@ -8,11 +8,16 @@ import {
   PAPER_CATEGORY,
 } from '../src/lib/setupRegistry.js';
 import { createPaperTradeRecord, validatePaperTradeRecord } from '../src/lib/paperTrader.js';
+import { activeStrategy, strategyVersion } from '../src/config/strategyVersion.js';
 
 function summaryWithSetups(setups) {
   return {
     generatedAt: '2026-04-29T00:00:00.000Z',
+    metadata: {
+      ...activeStrategy,
+    },
     proof: {
+      ...activeStrategy,
       status: 'FAILED_OOS',
       setups,
     },
@@ -68,7 +73,7 @@ test('setupRegistry freezes the official paper universe when no backtest summary
   const registry = buildSetupRegistry(null);
 
   assert.equal(registry.entries.length, 3);
-  assert.equal(registry.bySymbolKey['BTCUSDT:1h'].setupStatus, SETUP_STATUS.APPROVED_FOR_PAPER);
+  assert.equal(registry.bySymbolKey['BTCUSDT:1h'].setupStatus, SETUP_STATUS.COLLECT_MORE_DATA);
   assert.equal(registry.bySymbolKey['ETHUSDT:1h'].setupStatus, SETUP_STATUS.COLLECT_MORE_DATA);
   assert.equal(registry.bySymbolKey['SOLUSDT:15m'].setupStatus, SETUP_STATUS.REJECTED_OOS_FAILURE);
 });
@@ -137,6 +142,8 @@ test('paper trade records include setup approval fields', () => {
   assert.equal(record.isApprovedPaperTrade, true);
   assert.equal(record.paperCategory, PAPER_CATEGORY.PAPER_ELIGIBLE);
   assert.equal(record.recordQuality, 'VALID');
+  assert.equal(record.strategyVersion, strategyVersion);
+  assert.equal(record.riskModel, 'ATR-based TP/SL');
 });
 
 test('invalid paper trade cannot remain approved', () => {
@@ -174,6 +181,7 @@ test('paper trade validation rejects approved blocked or rejected setup records'
     signalValidity: 'BLOCKED',
     setupStatus: SETUP_STATUS.REJECTED_OOS_FAILURE,
     proofStatus: 'FAILED_OOS',
+    ...activeStrategy,
     paperCategory: PAPER_CATEGORY.PAPER_ELIGIBLE,
     isApprovedPaperTrade: true,
     openedAt: '2026-04-30T00:00:00.000Z',

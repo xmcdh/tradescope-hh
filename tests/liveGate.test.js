@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateLiveGate } from '../src/lib/liveGate.js';
+import { activeStrategy, strategyVersion } from '../src/config/strategyVersion.js';
 
 const OFFICIAL_START = Date.parse('2026-04-30T00:00:00.000Z');
 const AFTER_28_DAYS = OFFICIAL_START + 29 * 24 * 60 * 60 * 1000;
@@ -24,6 +25,7 @@ function makeTrades({
       id: `trade-${index}`,
       pair: index % 2 ? 'BTCUSDT' : 'ETHUSDT',
       timeframe: index % 3 ? '15m' : '1h',
+      ...activeStrategy,
       signalValidity: validity,
       setupStatus,
       paperCategory,
@@ -45,6 +47,8 @@ function passingContext(overrides = {}) {
     storage: { durable: true, warning: '' },
     nowMs: AFTER_28_DAYS,
     backtestComparison: {
+      strategyVersion,
+      summaryStrategyVersion: strategyVersion,
       proofStatus: 'PROVEN_READY_FOR_PAPER',
       oosDegradation: 0.1,
       divergenceWarning: '',
@@ -209,6 +213,8 @@ test('evaluateLiveGate fails OOS degradation gate', () => {
     oosDegradation: 0.2,
     backtestComparison: {
       proofStatus: 'PROVEN_READY_FOR_PAPER',
+      strategyVersion,
+      summaryStrategyVersion: strategyVersion,
       oosDegradation: 0.2,
       divergenceWarning: '',
     },
@@ -216,6 +222,35 @@ test('evaluateLiveGate fails OOS degradation gate', () => {
 
   assert.equal(result.ready, false);
   assert.ok(result.failedCriteria.some((item) => item.startsWith('OOS_DEGRADATION')));
+});
+
+test('evaluateLiveGate excludes old version trades from ATR proof', () => {
+  const oldVersionTrades = makeTrades({ count: 30, wins: 18 }).map((trade) => ({
+    ...trade,
+    strategyVersion: 'v1.0',
+    riskModel: 'Fixed percentage TP/SL',
+  }));
+  const result = evaluateLiveGate(passingContext({ trades: oldVersionTrades }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.equal(result.stats.excludedHistoricalCount, 30);
+  assert.ok(result.failedCriteria.some((item) => item.startsWith('MIN_CLOSED_TRADES')));
+});
+
+test('evaluateLiveGate does not mark ATR live ready without fresh backtest proof', () => {
+  const result = evaluateLiveGate(passingContext({
+    backtestComparison: {
+      strategyVersion,
+      summaryStrategyVersion: 'v1.0',
+      proofStatus: 'STALE_STRATEGY_VERSION',
+      oosDegradation: null,
+      divergenceWarning: 'Latest proof is stale.',
+    },
+  }));
+
+  assert.equal(result.ready, false);
+  assert.ok(result.failedCriteria.includes(`FRESH_ATR_BACKTEST_REQUIRED (${strategyVersion})`));
+  assert.ok(result.failedCriteria.some((item) => item.startsWith('BACKTEST_PROOF')));
 });
 
 test('evaluateLiveGate fails paper duration gate', () => {

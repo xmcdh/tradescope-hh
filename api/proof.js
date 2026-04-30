@@ -3,6 +3,7 @@ import path from 'node:path';
 import { loadLiveGate } from '../src/lib/liveGate.js';
 import { loadPaperHealth } from '../src/lib/paperHealth.js';
 import { buildSetupRegistry } from '../src/lib/setupRegistry.js';
+import { activeStrategy } from '../src/config/strategyVersion.js';
 
 async function readLatestBatchSummary() {
   const directory = path.resolve(process.cwd(), 'backtest-results');
@@ -35,6 +36,7 @@ function deriveVerdict(proof, liveGate) {
   }
 
   if (
+    proof?.strategyVersion === activeStrategy.strategyVersion &&
     proof?.status === 'PROVEN_READY_FOR_PAPER' &&
     liveGate?.paperGatePassed &&
     liveGate?.paperDurationPassed &&
@@ -43,7 +45,7 @@ function deriveVerdict(proof, liveGate) {
     return 'READY FOR SMALL LIVE TEST';
   }
 
-  if (proof?.status === 'PROVEN_READY_FOR_PAPER') {
+  if (proof?.strategyVersion === activeStrategy.strategyVersion && proof?.status === 'PROVEN_READY_FOR_PAPER') {
     return 'READY FOR PAPER TRADING';
   }
 
@@ -59,20 +61,26 @@ export default async function handler(_req, res) {
     const summary = await readLatestBatchSummary();
     const liveGate = await loadLiveGate();
     const paperHealth = await loadPaperHealth();
-    const proof = summary?.proof ?? null;
+    const summaryVersion = summary?.metadata?.strategyVersion ?? summary?.strategyVersion ?? summary?.proof?.strategyVersion ?? null;
+    const summaryMatchesActive = summaryVersion === activeStrategy.strategyVersion;
+    const proof = summaryMatchesActive ? summary?.proof ?? null : null;
     const setupRegistry = buildSetupRegistry(summary);
     const verdict = deriveVerdict(proof, liveGate);
 
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(200).json({
       verdict,
+      strategy: activeStrategy,
       proof,
       setupRegistry,
       summary,
+      summaryMatchesActive,
+      staleSummaryStrategyVersion: summaryMatchesActive ? null : summaryVersion,
       liveGate,
       paperHealth,
       readyForLive: verdict === 'READY FOR SMALL LIVE TEST',
       whyNotReady: [
+        ...(summaryMatchesActive ? [] : [`Fresh ATR backtest proof required for ${activeStrategy.strategyVersion}. Latest summary belongs to ${summaryVersion ?? 'no strategy version'}.`]),
         ...(proof?.failedCriteria ?? []),
         ...(liveGate?.failedCriteria ?? []),
         ...(liveGate?.storage?.warning ? [liveGate.storage.warning] : []),

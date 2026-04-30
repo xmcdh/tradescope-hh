@@ -5,7 +5,9 @@ import {
   calculatePaperTrackingCountdown,
   officialPaperTrackingStartTimestamp,
   OFFICIAL_PAPER_TRACKING_MIN_DAYS,
+  ACTIVE_STRATEGY_VERSION,
 } from '../config/paperTrackingConfig.js';
+import { activeStrategy, strategyVersion } from '../config/strategyVersion.js';
 
 const MIN_CLOSED_TRADES = 30;
 const MIN_PAPER_DURATION_DAYS = OFFICIAL_PAPER_TRACKING_MIN_DAYS;
@@ -55,11 +57,12 @@ function tradeTimestamp(trade) {
   return Number.isFinite(trade.timestamp) ? trade.timestamp : null;
 }
 
-function isApprovedOfficialTrade(trade, { storage }) {
+function isApprovedOfficialTrade(trade, { storage, activeVersion = ACTIVE_STRATEGY_VERSION }) {
   const timestamp = tradeTimestamp(trade);
 
   return (
     Boolean(storage?.durable) &&
+    trade.strategyVersion === activeVersion &&
     trade.isApprovedPaperTrade === true &&
     trade.paperCategory === 'PAPER_ELIGIBLE' &&
     trade.signalValidity === 'VALID' &&
@@ -73,8 +76,11 @@ function isApprovedOfficialTrade(trade, { storage }) {
 
 function computePaperStats(trades, options = {}) {
   const list = Array.isArray(trades) ? trades : [];
+  const activeVersion = options.strategyVersion ?? ACTIVE_STRATEGY_VERSION;
   const countdown = calculatePaperTrackingCountdown(options.nowMs ?? Date.now());
-  const approvedTrades = list.filter((trade) => isApprovedOfficialTrade(trade, options));
+  const activeVersionTrades = list.filter((trade) => trade.strategyVersion === activeVersion);
+  const historicalTrades = list.filter((trade) => trade.strategyVersion !== activeVersion);
+  const approvedTrades = list.filter((trade) => isApprovedOfficialTrade(trade, { ...options, activeVersion }));
   const closed = closedTradesOnly(approvedTrades);
   const wins = closed.filter((trade) => trade.status === 'WIN').length;
   const returns = closed.map((trade) => Number(trade.realizedR ?? 0)).filter(Number.isFinite);
@@ -85,12 +91,17 @@ function computePaperStats(trades, options = {}) {
     .filter(Number.isFinite)
     .sort((left, right) => left - right)
     .at(-1) ?? null;
-  const observationOnlyCount = list.filter((trade) => trade.paperCategory === 'OBSERVATION_ONLY').length;
-  const rejectedSetupCount = list.filter((trade) => trade.paperCategory === 'REJECTED_SETUP').length;
-  const blockedSignalCount = list.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL').length;
-  const marginalCount = list.filter((trade) => trade.signalValidity === 'MARGINAL').length;
+  const observationOnlyCount = activeVersionTrades.filter((trade) => trade.paperCategory === 'OBSERVATION_ONLY').length;
+  const rejectedSetupCount = activeVersionTrades.filter((trade) => trade.paperCategory === 'REJECTED_SETUP').length;
+  const blockedSignalCount = activeVersionTrades.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL').length;
+  const marginalCount = activeVersionTrades.filter((trade) => trade.signalValidity === 'MARGINAL').length;
 
   return {
+    strategyVersion: activeVersion,
+    strategyName: activeStrategy.strategyName,
+    riskModel: activeStrategy.riskModel,
+    activatedAt: activeStrategy.activatedAt,
+    signalLogicVersion: activeStrategy.signalLogicVersion,
     totalSignals: approvedTrades.length,
     totalClosedTrades: closed.length,
     winRate: closed.length ? wins / closed.length : 0,
@@ -111,6 +122,8 @@ function computePaperStats(trades, options = {}) {
     rejectedSetupCount,
     blockedSignalCount,
     marginalCount,
+    activeStrategyTradeCount: activeVersionTrades.length,
+    excludedHistoricalCount: historicalTrades.length,
     excludedCount: list.length - approvedTrades.length,
   };
 }
@@ -152,7 +165,38 @@ async function readLatestBacktestSummary() {
   }
 }
 
-function buildBacktestVsPaper(backtestSummary, paperStats) {
+function summaryStrategyVersion(backtestSummary) {
+  return backtestSummary?.metadata?.strategyVersion ?? backtestSummary?.strategyVersion ?? null;
+}
+
+function buildBacktestVsPaper(backtestSummary, paperStats, options = {}) {
+  const activeVersion = options.strategyVersion ?? ACTIVE_STRATEGY_VERSION;
+  const summaryVersion = summaryStrategyVersion(backtestSummary);
+
+  if (!backtestSummary || summaryVersion !== activeVersion) {
+    return {
+      strategyVersion: activeVersion,
+      summaryStrategyVersion: summaryVersion,
+      riskModel: activeStrategy.riskModel,
+      backtestClosedTrades: 0,
+      backtestWinRate: 0,
+      backtestExpectancy: 0,
+      backtestMaxDrawdown: 0,
+      proofStatus: summaryVersion ? 'STALE_STRATEGY_VERSION' : 'MISSING_ATR_BACKTEST_PROOF',
+      oosDegradation: null,
+      paperWinRate: paperStats.winRate,
+      paperExpectancy: paperStats.expectancy,
+      paperMaxDrawdown: paperStats.maxDrawdown,
+      winRateDelta: paperStats.winRate,
+      expectancyDelta: paperStats.expectancy,
+      maxDrawdownDelta: paperStats.maxDrawdown,
+      authoritative: false,
+      divergenceWarning: summaryVersion
+        ? `Latest backtest proof belongs to ${summaryVersion}; active strategy is ${activeVersion}.`
+        : `Fresh ATR backtest proof is required for ${activeVersion}.`,
+    };
+  }
+
   const proof = backtestSummary?.proof;
   const setups = backtestSummary?.results ?? [];
   const backtestTrades = setups.reduce((sum, item) => sum + (item.backtest?.actionableClosedTradeCount ?? 0), 0);
@@ -175,6 +219,9 @@ function buildBacktestVsPaper(backtestSummary, paperStats) {
   );
 
   return {
+    strategyVersion: activeVersion,
+    summaryStrategyVersion: summaryVersion,
+    riskModel: backtestSummary?.metadata?.riskModel ?? activeStrategy.riskModel,
     backtestClosedTrades: backtestTrades,
     backtestWinRate,
     backtestExpectancy,
@@ -196,7 +243,8 @@ function buildBacktestVsPaper(backtestSummary, paperStats) {
 }
 
 export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = null, storage = null, slippageEstimate = null, nowMs = Date.now() }) {
-  const baseStats = computePaperStats(trades ?? [], { storage, nowMs });
+  const activeVersion = backtestComparison?.strategyVersion ?? strategyVersion;
+  const baseStats = computePaperStats(trades ?? [], { storage, nowMs, strategyVersion: activeVersion });
   const authoritativeDurationDays = storage?.durable ? baseStats.paperDurationElapsedDays : 0;
   const stats = {
     ...baseStats,
@@ -209,7 +257,7 @@ export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = 
   };
   const failedCriteria = [];
   const durationPassed = authoritativeDurationDays >= MIN_PAPER_DURATION_DAYS;
-  const setupSamples = perSetupCounts(trades ?? [], { storage });
+  const setupSamples = perSetupCounts(trades ?? [], { storage, activeVersion });
   const suggestedSetupWarnings = Object.entries(setupSamples)
     .filter(([, count]) => count < 50)
     .map(([setup, count]) => `SETUP_SAMPLE_LOW (${setup} ${count}/50)`);
@@ -244,6 +292,10 @@ export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = 
     failedCriteria.push(`BACKTEST_PROOF (${backtestComparison.proofStatus})`);
   }
 
+  if (!backtestComparison || backtestComparison.strategyVersion !== activeVersion || backtestComparison.summaryStrategyVersion !== activeVersion) {
+    failedCriteria.push(`FRESH_ATR_BACKTEST_REQUIRED (${activeVersion})`);
+  }
+
   if (backtestComparison?.divergenceWarning) {
     failedCriteria.push(`BACKTEST_PAPER_DIVERGENCE (${backtestComparison.divergenceWarning})`);
   }
@@ -264,6 +316,7 @@ export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = 
       authoritative: Boolean(storage?.durable),
     },
     storage,
+    strategy: activeStrategy,
     thresholds: {
       minClosedTrades: MIN_CLOSED_TRADES,
       minPaperDurationDays: MIN_PAPER_DURATION_DAYS,
@@ -280,8 +333,8 @@ export async function loadLiveGate() {
   const trades = await readPaperTrades();
   const backtestSummary = await readLatestBacktestSummary();
   const storage = await getPaperTradeStorageStatus();
-  const paperStats = computePaperStats(trades);
-  const backtestComparison = buildBacktestVsPaper(backtestSummary, paperStats);
+  const paperStats = computePaperStats(trades, { storage, strategyVersion });
+  const backtestComparison = buildBacktestVsPaper(backtestSummary, paperStats, { strategyVersion });
 
   return evaluateLiveGate({
     trades,

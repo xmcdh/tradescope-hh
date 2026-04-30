@@ -7,6 +7,7 @@ import {
   validateCandleIntegrity,
 } from '../src/lib/backtester.js';
 import { evaluateSplitValidation, validateBacktest } from '../src/lib/backtestValidator.js';
+import { strategyVersion } from '../src/config/strategyVersion.js';
 
 function makeCandles(count, start = 100) {
   const candles = [];
@@ -100,6 +101,7 @@ test('runBacktest accepts synthetic OHLCV candles and returns summary shape', ()
 
   assert.equal(result.pair, 'BTCUSDT');
   assert.equal(result.timeframe, '15m');
+  assert.equal(result.strategyVersion, strategyVersion);
   assert.equal(result.candleCount, 260);
   assert.ok(Array.isArray(result.signals));
   assert.ok(Array.isArray(result.trades));

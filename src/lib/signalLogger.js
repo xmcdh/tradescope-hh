@@ -4,6 +4,7 @@ import {
   updateSignalLog,
   writeSignalLog,
 } from './storageAdapter.js';
+import { strategyMetadata, strategyVersion } from '../config/strategyVersion.js';
 
 const EXPIRY_MS = 48 * 60 * 60 * 1000;
 
@@ -16,7 +17,7 @@ function normalizeTimestamp(value) {
 }
 
 function signalId({ pair, timeframe, direction, timestamp }) {
-  return `${pair}:${timeframe}:${direction}:${timestamp}`;
+  return `${strategyVersion}:${pair}:${timeframe}:${direction}:${timestamp}`;
 }
 
 export async function readSignalLog() {
@@ -38,6 +39,7 @@ function entryFromSignal({ pair, timeframe, setup }) {
     candleTimestamp: timestamp,
     pair,
     timeframe,
+    ...strategyMetadata(),
     direction,
     entry: setup?.entry1 ?? null,
     stopLoss: setup?.sl ?? null,
@@ -146,7 +148,7 @@ function settleAgainstCandles(entry, candles) {
 export async function syncSignalLog({ pair, timeframe, setup, candles }) {
   const entries = await readSignalLog();
   const toUpdate = entries
-    .filter((entry) => entry.pair === pair && entry.timeframe === timeframe)
+    .filter((entry) => entry.pair === pair && entry.timeframe === timeframe && entry.strategyVersion === strategyVersion)
     .map((entry) => ({
       id: entry.id,
       updates: settleAgainstCandles(entry, candles ?? []),

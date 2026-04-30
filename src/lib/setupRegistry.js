@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DISABLED_SETUPS, normalizeSetupConfigKey } from '../config/disabledSetups.js';
-import { OFFICIAL_PAPER_SETUPS } from '../config/paperTrackingConfig.js';
+import { ACTIVE_STRATEGY_VERSION, OFFICIAL_PAPER_SETUPS } from '../config/paperTrackingConfig.js';
 
 export const SETUP_STATUS = {
   APPROVED_FOR_PAPER: 'APPROVED_FOR_PAPER',
@@ -161,10 +161,12 @@ function entryFromOfficialSetup(config, resultByKey, disabledMap) {
 }
 
 export function buildSetupRegistry(summary, options = {}) {
-  const proof = summary?.proof ?? null;
+  const summaryStrategyVersion = summary?.metadata?.strategyVersion ?? summary?.strategyVersion ?? summary?.proof?.strategyVersion ?? null;
+  const strategyMatches = summaryStrategyVersion === ACTIVE_STRATEGY_VERSION;
+  const proof = strategyMatches ? summary?.proof ?? null : null;
   const disabledMap = manualDisableMap(options.disabledSetups);
   const resultByKey = new Map(
-    (summary?.results ?? []).map((item) => [toSetupSymbolKey(item.pair, item.timeframe), item]),
+    (strategyMatches ? summary?.results ?? [] : []).map((item) => [toSetupSymbolKey(item.pair, item.timeframe), item]),
   );
   const officialKeys = new Set(OFFICIAL_PAPER_SETUPS.map((item) => toSetupSymbolKey(item.pair, item.timeframe)));
   const proofEntries = (proof?.setups ?? [])
@@ -178,11 +180,16 @@ export function buildSetupRegistry(summary, options = {}) {
 
     return {
       ...official,
+      proofStatus: fromProof?.proofStatus ?? official.proofStatus,
+      setupStatus: fromProof?.setupStatus ?? official.setupStatus,
       actionableTrades: fromProof?.actionableTrades ?? official.actionableTrades,
       expectancy: fromProof?.expectancy ?? official.expectancy,
       winRate: fromProof?.winRate ?? official.winRate,
       maxDrawdown: fromProof?.maxDrawdown ?? official.maxDrawdown,
       oosStatus: fromProof?.oosStatus ?? official.oosStatus,
+      recommendation: fromProof?.recommendation ?? official.recommendation,
+      failedCriteria: fromProof?.failedCriteria ?? official.failedCriteria,
+      rejectionReason: fromProof?.rejectionReason ?? official.rejectionReason,
     };
   });
   const bySymbolKey = Object.fromEntries(entries.map((entry) => [entry.symbolKey, entry]));
@@ -204,7 +211,8 @@ export function buildSetupRegistry(summary, options = {}) {
 
   return {
     generatedAt: summary?.generatedAt ?? null,
-    proofStatus: proof?.status ?? 'UNKNOWN',
+    proofStatus: proof?.status ?? (summary && !strategyMatches ? 'STALE_STRATEGY_VERSION' : 'UNKNOWN'),
+    strategyVersion: ACTIVE_STRATEGY_VERSION,
     counts,
     entries,
     bySymbolKey,

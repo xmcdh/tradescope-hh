@@ -1,5 +1,6 @@
 import { calculateIndicators } from './indicators.js';
 import { buildSignalSetup } from './signalLogic.js';
+import { strategyMetadata } from '../config/strategyVersion.js';
 
 export const DEFAULT_MIN_LOOKBACK = 200;
 const EXECUTABLE_SIGNALS = new Set(['LONG', 'SHORT']);
@@ -146,11 +147,12 @@ export function validateCandleIntegrity(candles, timeframe, options = {}) {
   };
 }
 
-function signalRecord({ candle, pair, timeframe, setup }) {
+function signalRecord({ candle, pair, timeframe, setup, strategy }) {
   return {
     timestamp: candle.time * 1000,
     pair,
     timeframe,
+    ...strategy,
     signal: setup?.signal ?? 'NO_SIGNAL',
     score: setup?.score ?? 0,
     confidenceScore: setup?.confidenceScore ?? setup?.score ?? 0,
@@ -382,6 +384,8 @@ export function calculatePerformance(trades, signalBreakdown = {}, signalValidit
 }
 
 function baseEmptyResult(pair, timeframe, candleCount, integrity) {
+  const strategy = strategyMetadata();
+
   return {
     ...calculatePerformance([], {}, {}),
     signals: [],
@@ -390,6 +394,7 @@ function baseEmptyResult(pair, timeframe, candleCount, integrity) {
     timeframe,
     candleCount,
     integrity,
+    ...strategy,
   };
 }
 
@@ -400,6 +405,7 @@ export function runBacktest(candles, pair, timeframe, options = {}) {
   const startIndex = Math.max(minLookback - 1, options.startIndex ?? minLookback - 1);
   const endIndex = Math.min(normalizedCandles.length - 1, options.endIndex ?? normalizedCandles.length - 1);
   const signalMode = options.signalMode ?? 'conservative';
+  const strategy = strategyMetadata(options.strategyMetadata ?? {});
   const signalBreakdown = {};
   const signalValidityBreakdown = {};
   const signals = [];
@@ -440,6 +446,7 @@ export function runBacktest(candles, pair, timeframe, options = {}) {
       pair,
       timeframe,
       setup,
+      strategy,
     });
 
     signals.push(record);
@@ -469,5 +476,6 @@ export function runBacktest(candles, pair, timeframe, options = {}) {
     timeframe,
     candleCount: normalizedCandles.length,
     integrity,
+    ...strategy,
   };
 }

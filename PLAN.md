@@ -80,6 +80,20 @@ TradeScope/
 
 ## Logic Sinyal
 
+### Strategy Versioning
+
+ATR-based TP/SL is treated as a new strategy/risk logic version:
+
+```text
+Active Strategy Version: v1.1-atr-risk
+Strategy Name: TradeScope Futures ATR Risk
+Risk Model: ATR-based TP/SL
+Activated At: 2026-04-30T05:26:46.000Z
+Official Paper Day 1: 2026-04-30 for v1.1 only
+```
+
+The v1.0 paper phase is archived/superseded. Old records remain historical, but they do not count toward the current ATR proof gate. v1.1 must produce fresh ATR-based backtest, OOS validation, walk-forward validation, setup approval, and official paper proof before any live-readiness verdict can improve. Live execution remains stubbed.
+
 ### Layer 1 — Trend Filter (EMA)
 
 ```text

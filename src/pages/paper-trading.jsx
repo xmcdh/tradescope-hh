@@ -126,15 +126,25 @@ export default function PaperTradingPage() {
   }, []);
 
   const trades = payload?.trades ?? [];
-  const approvedTrades = useMemo(() => trades.filter((trade) => trade.paperCategory === 'PAPER_ELIGIBLE'), [trades]);
-  const observationTrades = useMemo(() => trades.filter((trade) => trade.paperCategory === 'OBSERVATION_ONLY'), [trades]);
-  const rejectedTrades = useMemo(() => trades.filter((trade) => trade.paperCategory === 'REJECTED_SETUP'), [trades]);
-  const blockedTrades = useMemo(() => trades.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL'), [trades]);
-  const openTrades = useMemo(() => approvedTrades.filter((trade) => trade.status === 'OPEN'), [approvedTrades]);
   const gate = payload?.gate;
   const paperHealth = payload?.paperHealth;
   const gateStats = gate?.stats ?? {};
   const thresholds = gate?.thresholds ?? {};
+  const strategy = gate?.strategy ?? paperHealth ?? {};
+  const activeVersion = strategy.strategyVersion ?? gateStats.strategyVersion;
+  const activeTrades = useMemo(
+    () => trades.filter((trade) => !activeVersion || trade.strategyVersion === activeVersion),
+    [trades, activeVersion],
+  );
+  const historicalTrades = useMemo(
+    () => trades.filter((trade) => activeVersion && trade.strategyVersion !== activeVersion),
+    [trades, activeVersion],
+  );
+  const approvedTrades = useMemo(() => activeTrades.filter((trade) => trade.paperCategory === 'PAPER_ELIGIBLE'), [activeTrades]);
+  const observationTrades = useMemo(() => activeTrades.filter((trade) => trade.paperCategory === 'OBSERVATION_ONLY'), [activeTrades]);
+  const rejectedTrades = useMemo(() => activeTrades.filter((trade) => trade.paperCategory === 'REJECTED_SETUP'), [activeTrades]);
+  const blockedTrades = useMemo(() => activeTrades.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL'), [activeTrades]);
+  const openTrades = useMemo(() => approvedTrades.filter((trade) => trade.status === 'OPEN'), [approvedTrades]);
 
   return (
     <main className="min-h-screen bg-[var(--bg-primary)] px-4 py-6 text-[var(--text-primary)] md:px-6">
@@ -172,7 +182,21 @@ export default function PaperTradingPage() {
             </div>
           ) : null}
           <div className="mt-2 text-sm text-[var(--text-secondary)]">
-            Collecting authoritative paper data. Only approved setups count toward the paper gate; observation-only signals are logged but not counted.
+            ATR TP/SL changed the active risk model. Official proof is now versioned. Old records are historical and do not count toward the current ATR proof gate.
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/10">
+          <div className="border-b border-[var(--accent-yellow)]/20 px-4 py-3 text-sm font-semibold text-[var(--accent-yellow)]">Active Strategy Version</div>
+          <div className="grid gap-3 p-4 text-sm text-[var(--text-secondary)] md:grid-cols-2 xl:grid-cols-4">
+            <div>Version: {activeVersion ?? '--'}</div>
+            <div>Risk Model: {strategy.riskModel ?? gateStats.riskModel ?? '--'}</div>
+            <div>Official Paper Day 1: {paperHealth?.officialPaperTrackingStartDate ?? gateStats.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div>Current verdict: NOT READY</div>
+            <div>Previous history excluded: yes</div>
+            <div>Historical excluded records: {paperHealth?.excludedHistoricalCount ?? gateStats.excludedHistoricalCount ?? historicalTrades.length}</div>
+            <div>Activated At: {strategy.activatedAt ?? gateStats.activatedAt ?? '--'}</div>
+            <div>Signal Logic: {strategy.signalLogicVersion ?? gateStats.signalLogicVersion ?? '--'}</div>
           </div>
         </section>
 
@@ -180,6 +204,8 @@ export default function PaperTradingPage() {
           <div className="border-b border-[var(--border-subtle)] px-4 py-3 text-sm font-semibold">Paper Tracking Health</div>
           <div className="grid gap-3 p-4 text-sm text-[var(--text-secondary)] md:grid-cols-2 xl:grid-cols-4">
             <div>Storage: {paperHealth?.storageAuthority ?? gate?.storage?.authority ?? 'LOCAL_ONLY'}</div>
+            <div>Active Strategy Version: {paperHealth?.strategyVersion ?? gateStats.strategyVersion ?? '--'}</div>
+            <div>Risk Model: {paperHealth?.riskModel ?? gateStats.riskModel ?? '--'}</div>
             <div>Official Day 1: {paperHealth?.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
             <div>Paper Duration: {paperHealth?.daysElapsed ?? gateStats.paperDurationElapsedDays ?? 0} / {paperHealth?.minimumDays ?? gateStats.paperDurationMinDays ?? 28} days</div>
             <div>Days Remaining: {paperHealth?.daysRemaining ?? gateStats.paperDurationRemainingDays ?? 28}</div>
@@ -191,11 +217,11 @@ export default function PaperTradingPage() {
             <div>Last proof snapshot: {paperHealth?.lastSnapshotAt ? new Date(paperHealth.lastSnapshotAt).toLocaleString('id-ID') : '--'}</div>
             <div>Snapshot freshness: {paperHealth?.snapshotFreshness ?? 'MISSING'}</div>
             <div>Live execution: {paperHealth?.liveExecutionStatus ?? 'UNKNOWN'}</div>
-            <div>Current verdict: {paperHealth?.globalVerdict ?? 'NOT READY'}</div>
+            <div>Current verdict: NOT READY</div>
             <div>Paper Tracking Source: {gate?.storage?.authoritative ? 'Durable Database' : 'Local JSON'}</div>
           </div>
           <div className="border-t border-[var(--border-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-            Only approved BTC/USDT 1h trades count right now. Observation-only and rejected setups are not counted toward live readiness.
+            ATR TP/SL changed the active risk model. Official proof is now versioned. Old records are historical and do not count toward the current ATR proof gate.
           </div>
           <OperatorNudge paperHealth={paperHealth} />
         </section>
@@ -390,6 +416,7 @@ export default function PaperTradingPage() {
         <TradeTable title="Observation-Only Signals" rows={observationTrades} emptyLabel="No observation-only signals logged yet." />
         <TradeTable title="Rejected Setup Signals" rows={rejectedTrades} emptyLabel="No rejected setup signals logged yet." />
         <TradeTable title="Blocked Signals" rows={blockedTrades} emptyLabel="No blocked signals logged yet." />
+        <TradeTable title="Historical Paper Records Excluded From Current ATR Proof" rows={historicalTrades} emptyLabel="No historical records found." />
       </div>
     </main>
   );

@@ -3,6 +3,7 @@ import { computePerformanceStats } from '../src/lib/performanceStats.js';
 import { loadLiveGate } from '../src/lib/liveGate.js';
 import { loadPaperHealth } from '../src/lib/paperHealth.js';
 import { getStorageStatus } from '../src/lib/storageAdapter.js';
+import { activeStrategy } from '../src/config/strategyVersion.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -19,7 +20,7 @@ export default async function handler(req, res) {
     const gate = await loadLiveGate();
     const storage = await getStorageStatus();
     const paperHealth = await loadPaperHealth();
-    return res.status(200).json({ trades, stats, gate, storage, paperHealth });
+    return res.status(200).json({ trades, stats, gate, storage, paperHealth, strategy: activeStrategy });
   }
 
   if (req.method === 'POST') {

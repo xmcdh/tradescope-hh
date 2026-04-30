@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import { executeBacktestRun, outputName, parseArgs } from './runBacktest.js';
 import { evaluateProfitabilityProof } from '../lib/profitabilityProof.js';
+import { strategyMetadata } from '../config/strategyVersion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -79,10 +80,12 @@ async function main() {
     }
   }
 
-  const proof = evaluateProfitabilityProof(results);
+  const strategy = strategyMetadata();
+  const proof = evaluateProfitabilityProof(results, { strategyVersion: strategy.strategyVersion });
   const summary = {
     generatedAt: new Date().toISOString(),
     metadata: {
+      ...strategy,
       from,
       to,
       marketType,

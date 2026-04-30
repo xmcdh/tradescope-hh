@@ -4,6 +4,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { runBacktest, validateCandleIntegrity } from '../lib/backtester.js';
 import { validateBacktest } from '../lib/backtestValidator.js';
+import { strategyMetadata } from '../config/strategyVersion.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -171,7 +172,8 @@ async function buildVersionMetadata() {
   ];
 
   return {
-    strategyVersion: await hashFiles(strategyFiles),
+    ...strategyMetadata(),
+    strategyFingerprint: await hashFiles(strategyFiles),
     signalLogicVersion: await hashFiles([path.join(PROJECT_ROOT, 'src/lib/signalLogic.js')]),
   };
 }

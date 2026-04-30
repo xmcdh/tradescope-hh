@@ -128,7 +128,7 @@ const cases = [
     expectedValidity: 'BLOCKED',
     expect: (setup) =>
       ['NO_TRADE', 'WAIT'].includes(setup.signal) &&
-      setup.rejectionReasons.some((reason) => reason.includes('RR to TP1 is below')),
+      setup.rejectionReasons.some((reason) => reason.includes('Price within 1% of resistance')),
   },
   {
     name: 'Candle terlalu panjang',

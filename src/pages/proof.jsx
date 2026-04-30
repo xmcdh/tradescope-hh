@@ -92,6 +92,7 @@ export default function ProofPage() {
   const paperHealth = payload?.paperHealth;
   const setupRegistry = payload?.setupRegistry;
   const stats = liveGate?.stats ?? {};
+  const strategy = payload?.strategy ?? liveGate?.strategy ?? paperHealth ?? {};
 
   return (
     <main className="min-h-screen bg-[var(--bg-primary)] px-4 py-6 text-[var(--text-primary)] md:px-6">
@@ -123,7 +124,21 @@ export default function ProofPage() {
               : 'Not ready for live trading. Collecting authoritative paper data.'}
           </div>
           <div className="mt-2 text-sm text-[var(--text-secondary)]">
-            Only approved setups count toward the paper gate. Observation-only signals are logged but not counted.
+            ATR TP/SL changed the active risk model. Official proof is now versioned. Old records are historical and do not count toward the current ATR proof gate.
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-lg border border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/10">
+          <div className="border-b border-[var(--accent-yellow)]/20 px-4 py-3 text-sm font-semibold text-[var(--accent-yellow)]">Active Strategy Version</div>
+          <div className="grid gap-3 p-4 text-sm text-[var(--text-secondary)] md:grid-cols-2 xl:grid-cols-4">
+            <div>Version: {strategy.strategyVersion ?? stats.strategyVersion ?? '--'}</div>
+            <div>Risk Model: {strategy.riskModel ?? stats.riskModel ?? '--'}</div>
+            <div>Official Paper Day 1: {paperHealth?.officialPaperTrackingStartDate ?? stats.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+            <div>Current verdict: NOT READY</div>
+            <div>Previous history excluded: {paperHealth?.previousPaperHistoryExcluded || (stats.excludedHistoricalCount ?? 0) > 0 ? 'yes' : 'yes'}</div>
+            <div>Historical excluded records: {paperHealth?.excludedHistoricalCount ?? stats.excludedHistoricalCount ?? 0}</div>
+            <div>Activated At: {strategy.activatedAt ?? stats.activatedAt ?? '--'}</div>
+            <div>Signal Logic: {strategy.signalLogicVersion ?? stats.signalLogicVersion ?? '--'}</div>
           </div>
         </section>
 
@@ -131,6 +146,8 @@ export default function ProofPage() {
           <div className="border-b border-[var(--border-subtle)] px-4 py-3 text-sm font-semibold">Paper Tracking Health</div>
           <div className="grid gap-3 p-4 text-sm text-[var(--text-secondary)] md:grid-cols-2 xl:grid-cols-4">
             <div>Storage: {paperHealth?.storageAuthority ?? liveGate?.storage?.authority ?? 'LOCAL_ONLY'}</div>
+            <div>Active Strategy Version: {paperHealth?.strategyVersion ?? stats.strategyVersion ?? '--'}</div>
+            <div>Risk Model: {paperHealth?.riskModel ?? stats.riskModel ?? '--'}</div>
             <div>Official Day 1: {paperHealth?.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
             <div>Paper Duration: {paperHealth?.daysElapsed ?? stats.paperDurationElapsedDays ?? 0} / {paperHealth?.minimumDays ?? stats.paperDurationMinDays ?? 28} days</div>
             <div>Days Remaining: {paperHealth?.daysRemaining ?? stats.paperDurationRemainingDays ?? 28}</div>
@@ -142,11 +159,11 @@ export default function ProofPage() {
             <div>Last proof snapshot: {paperHealth?.lastSnapshotAt ? new Date(paperHealth.lastSnapshotAt).toLocaleString('id-ID') : '--'}</div>
             <div>Snapshot freshness: {paperHealth?.snapshotFreshness ?? 'MISSING'}</div>
             <div>Live execution: {paperHealth?.liveExecutionStatus ?? 'UNKNOWN'}</div>
-            <div>Current verdict: {paperHealth?.globalVerdict ?? payload?.verdict ?? 'NOT READY'}</div>
+            <div>Current verdict: NOT READY</div>
             <div>Eligible setup: BTC/USDT 1h only</div>
           </div>
           <div className="border-t border-[var(--border-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">
-            Collecting authoritative paper data. Only approved BTC/USDT 1h trades count right now. Observation-only and rejected setups are not counted toward live readiness.
+            ATR TP/SL changed the active risk model. Official proof is now versioned. Old records are historical and do not count toward the current ATR proof gate.
           </div>
           <OperatorNudge paperHealth={paperHealth} />
         </section>

@@ -12,6 +12,7 @@ import {
   weeklyPaperAuditMarkdown,
 } from '../src/lib/paperAudit.js';
 import liveExecutionHandler from '../api/live-execution.js';
+import { activeStrategy } from '../src/config/strategyVersion.js';
 
 function healthyPoolFactory() {
   return {
@@ -31,27 +32,27 @@ function healthyPoolFactory() {
         if (values[0] === 'signal_logs') {
           return {
             rows: [
-              'id','pair','timeframe','direction','signal','signal_validity','setup_status','proof_status','candle_timestamp','entry','stop_loss','take_profit','rr','score','result','exit_price','exit_timestamp','realized_r','r_result','btc_context','blocked_reason','created_at','updated_at',
+              'id','pair','timeframe','strategy_version','risk_model','signal_logic_version','activated_at','direction','signal','signal_validity','setup_status','proof_status','candle_timestamp','entry','stop_loss','take_profit','rr','score','result','exit_price','exit_timestamp','realized_r','r_result','btc_context','blocked_reason','created_at','updated_at',
             ].map((column_name) => ({ column_name })),
           };
         }
         if (values[0] === 'paper_trades') {
           return {
             rows: [
-              'id','pair','timeframe','direction','signal','signal_validity','setup_status','proof_status','paper_category','is_approved_paper_trade','rejection_reason','entry','stop_loss','take_profit','rr','score','opened_at','closed_at','status','exit_price','exit_timestamp','realized_r','r_result','btc_context','created_at','updated_at',
+              'id','pair','timeframe','strategy_version','risk_model','signal_logic_version','activated_at','direction','signal','signal_validity','setup_status','proof_status','paper_category','is_approved_paper_trade','rejection_reason','entry','stop_loss','take_profit','rr','score','opened_at','closed_at','status','exit_price','exit_timestamp','realized_r','r_result','btc_context','created_at','updated_at',
             ].map((column_name) => ({ column_name })),
           };
         }
         if (values[0] === 'proof_snapshots') {
           return {
             rows: [
-              'id','verdict','generated_at','approved_setup_count','collecting_data_setup_count','rejected_setup_count','storage_status','source_batch_filename','source_report_filename','payload_json','created_at','updated_at',
+              'id','verdict','strategy_version','risk_model','signal_logic_version','activated_at','generated_at','approved_setup_count','collecting_data_setup_count','rejected_setup_count','storage_status','source_batch_filename','source_report_filename','payload_json','created_at','updated_at',
             ].map((column_name) => ({ column_name })),
           };
         }
         return {
           rows: [
-            'id','pair','timeframe','proof_status','setup_status','recommendation','source_report_id','created_at','updated_at',
+            'id','pair','timeframe','strategy_version','risk_model','signal_logic_version','activated_at','proof_status','setup_status','recommendation','source_report_id','created_at','updated_at',
           ].map((column_name) => ({ column_name })),
         };
       }
@@ -230,6 +231,7 @@ test('proof snapshots can be written and read through storage adapter', async ()
 
   await adapter.writeProofSnapshot({
     id: 'proof-1',
+    ...activeStrategy,
     verdict: 'NOT READY',
     generatedAt: '2026-04-29T00:00:00.000Z',
     approvedSetupCount: 1,
@@ -242,6 +244,7 @@ test('proof snapshots can be written and read through storage adapter', async ()
   const snapshots = await adapter.readProofSnapshots();
   assert.equal(snapshots.length, 1);
   assert.equal(snapshots[0].verdict, 'NOT READY');
+  assert.equal(snapshots[0].strategyVersion, 'v1.1-atr-risk');
 });
 
 test('rejected setup cannot become approved even if durable storage is configured', () => {
@@ -313,7 +316,10 @@ test('db:check reports missing tables and columns', async () => {
 test('paper proof report markdown includes official start and non-gate categories', () => {
   const markdown = paperProofReportMarkdown({
     generatedAt: '2026-04-30T00:00:00.000Z',
+    ...activeStrategy,
     officialPaperTrackingStartDate: '2026-04-30',
+    previousPaperHistoryExcluded: true,
+    excludedHistoricalCount: 4,
     finalVerdict: 'NOT READY',
     storage: {
       mode: 'database',
@@ -357,11 +363,15 @@ test('paper proof report markdown includes official start and non-gate categorie
       observationOnly: { total: 2 },
       rejected: { total: 1 },
       blocked: { total: 3 },
+      historical: { total: 4 },
     },
     whyNotReady: ['MIN_CLOSED_TRADES (0/30)'],
   });
 
   assert.match(markdown, /Official Paper Tracking Day 1: 2026-04-30/);
+  assert.match(markdown, /Active Strategy Version: v1\.1-atr-risk/);
+  assert.match(markdown, /Risk Model: ATR-based TP\/SL/);
+  assert.match(markdown, /Historical excluded total: 4/);
   assert.match(markdown, /Snapshot ID: daily-paper-proof:2026-04-30/);
   assert.match(markdown, /Next required milestone:/);
   assert.match(markdown, /BTC\/USDT 1h: APPROVED_FOR_PAPER/);
@@ -380,10 +390,11 @@ test('paper health aggregates approved, observation, rejected, blocked, and snap
       paperDurationPassed: false,
       failedCriteria: ['PAPER_DURATION (1/28 days)'],
     },
-    snapshots: [{ id: 'snap', generatedAt: '2026-04-30T23:00:00.000Z' }],
+    snapshots: [{ id: 'snap', ...activeStrategy, generatedAt: '2026-04-30T23:00:00.000Z' }],
     trades: [
       {
         id: 'approved-open',
+        ...activeStrategy,
         pair: 'BTCUSDT',
         timeframe: '1h',
         direction: 'LONG',
@@ -396,6 +407,7 @@ test('paper health aggregates approved, observation, rejected, blocked, and snap
       },
       {
         id: 'approved-closed',
+        ...activeStrategy,
         pair: 'BTCUSDT',
         timeframe: '1h',
         direction: 'SHORT',
@@ -406,18 +418,20 @@ test('paper health aggregates approved, observation, rejected, blocked, and snap
         status: 'WIN',
         openedAt: '2026-04-30T03:00:00.000Z',
       },
-      { id: 'obs', paperCategory: 'OBSERVATION_ONLY', openedAt: '2026-04-30T04:00:00.000Z' },
-      { id: 'rej', paperCategory: 'REJECTED_SETUP', openedAt: '2026-04-30T05:00:00.000Z' },
-      { id: 'block', paperCategory: 'BLOCKED_SIGNAL', openedAt: '2026-04-30T06:00:00.000Z' },
+      { id: 'obs', ...activeStrategy, paperCategory: 'OBSERVATION_ONLY', openedAt: '2026-04-30T04:00:00.000Z' },
+      { id: 'rej', ...activeStrategy, paperCategory: 'REJECTED_SETUP', openedAt: '2026-04-30T05:00:00.000Z' },
+      { id: 'block', ...activeStrategy, paperCategory: 'BLOCKED_SIGNAL', openedAt: '2026-04-30T06:00:00.000Z' },
+      { id: 'old', strategyVersion: 'v1.0', paperCategory: 'PAPER_ELIGIBLE', openedAt: '2026-04-30T07:00:00.000Z' },
     ],
   });
 
   assert.equal(health.storageAuthority, 'AUTHORITATIVE');
   assert.equal(health.daysElapsed, 1);
   assert.equal(health.daysRemaining, 27);
-  assert.equal(health.approvedSetupCount, 1);
+  assert.equal(health.approvedSetupCount, 0);
   assert.equal(health.approvedOpenTrades, 1);
   assert.equal(health.approvedClosedTrades, 1);
+  assert.equal(health.excludedHistoricalCount, 1);
   assert.equal(health.observationOnlyCount, 1);
   assert.equal(health.rejectedSetupCount, 1);
   assert.equal(health.blockedSignalCount, 1);
@@ -455,9 +469,12 @@ test('daily paper check output summarizes empty day one state', () => {
     snapshotFreshness: 'MISSING',
     liveExecutionStatus: 'STUBBED',
     globalVerdict: 'NOT READY',
+    ...activeStrategy,
   });
 
   assert.match(output, /Storage: AUTHORITATIVE/);
+  assert.match(output, /Active Strategy: v1\.1-atr-risk/);
+  assert.match(output, /Risk Model: ATR-based TP\/SL/);
   assert.match(output, /Paper Day: 1 \/ 28/);
   assert.match(output, /Approved Closed Trades: 0 \/ 30/);
   assert.match(output, /Verdict: NOT READY/);
@@ -472,6 +489,7 @@ test('weekly audit detects paper counting anomalies', () => {
     trades: [
       {
         id: 'eth-approved',
+        ...activeStrategy,
         pair: 'ETH/USDT',
         timeframe: '1h',
         direction: 'LONG',
@@ -487,6 +505,7 @@ test('weekly audit detects paper counting anomalies', () => {
       },
       {
         id: 'sol-approved',
+        ...activeStrategy,
         pair: 'SOL/USDT',
         timeframe: '15m',
         direction: 'SHORT',
@@ -502,6 +521,7 @@ test('weekly audit detects paper counting anomalies', () => {
       },
       {
         id: 'blocked-approved',
+        ...activeStrategy,
         pair: 'BTC/USDT',
         timeframe: '1h',
         direction: 'LONG',
@@ -517,6 +537,7 @@ test('weekly audit detects paper counting anomalies', () => {
       },
       {
         id: 'pre-start',
+        ...activeStrategy,
         pair: 'BTC/USDT',
         timeframe: '1h',
         direction: 'LONG',
@@ -548,6 +569,7 @@ test('weekly audit markdown includes anomalies and next action', () => {
     generatedAt: '2026-04-30T00:00:00.000Z',
     dateRange: { from: '2026-04-24', to: '2026-04-30' },
     storage: { authority: 'AUTHORITATIVE' },
+    ...activeStrategy,
     officialPaperTrackingStartDate: '2026-04-30',
     daysElapsed: 0,
     daysRemaining: 28,

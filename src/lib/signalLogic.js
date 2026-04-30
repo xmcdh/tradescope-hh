@@ -248,22 +248,25 @@ function buildRiskLevels(direction, indicators) {
       rewardTp2: null,
       rrTp1: null,
       rrTp2: null,
+      rrRatio: null,
       slAtrMultiple: null,
+      atr,
     };
   }
 
   if (direction === 'LONG') {
     const belowLevels = levelCandidates([support, ema20, ema50, ...swingLows], (level) => level < price);
-    const aboveLevels = levelCandidates([resistance, ...swingHighs], (level) => level > price);
     const baseSupport = belowLevels.at(-1);
     const entry2 = Number.isFinite(baseSupport) ? baseSupport : fallbackPullback;
-    const sl = Number.isFinite(baseSupport) ? baseSupport - atr * 0.35 : null;
-    const risk = Number.isFinite(sl) ? entry1 - sl : null;
-    const tp1 = aboveLevels[0] ?? null;
-    const minTwoR = Number.isFinite(risk) ? entry1 + risk * 2 : null;
-    const tp2 = aboveLevels.find((level) => level > (tp1 ?? entry1)) ?? minTwoR;
-    const rewardTp1 = Number.isFinite(tp1) ? tp1 - entry1 : null;
-    const rewardTp2 = Number.isFinite(tp2) ? tp2 - entry1 : null;
+    const atrStop = entry1 - atr * 1.5;
+    const sl = Number.isFinite(baseSupport) ? Math.min(atrStop, baseSupport) : atrStop;
+    const risk = entry1 - sl;
+    const tp1 = entry1 + risk * 1.5;
+    const tp2 = entry1 + risk * 2.5;
+    const rewardTp1 = tp1 - entry1;
+    const rewardTp2 = tp2 - entry1;
+    const rrTp1 = risk > 0 ? rewardTp1 / risk : null;
+    const rrTp2 = risk > 0 ? rewardTp2 / risk : null;
 
     return {
       entry1,
@@ -274,23 +277,26 @@ function buildRiskLevels(direction, indicators) {
       risk,
       rewardTp1,
       rewardTp2,
-      rrTp1: Number.isFinite(rewardTp1) && Number.isFinite(risk) && risk > 0 ? rewardTp1 / risk : null,
-      rrTp2: Number.isFinite(rewardTp2) && Number.isFinite(risk) && risk > 0 ? rewardTp2 / risk : null,
+      rrTp1,
+      rrTp2,
+      rrRatio: rrTp1,
       slAtrMultiple: Number.isFinite(risk) ? risk / atr : null,
+      atr,
     };
   }
 
   const aboveLevels = levelCandidates([resistance, ema20, ema50, ...swingHighs], (level) => level > price);
-  const belowLevels = levelCandidates([support, ...swingLows], (level) => level < price);
   const baseResistance = aboveLevels[0];
   const entry2 = Number.isFinite(baseResistance) ? baseResistance : fallbackPullback;
-  const sl = Number.isFinite(baseResistance) ? baseResistance + atr * 0.35 : null;
-  const risk = Number.isFinite(sl) ? sl - entry1 : null;
-  const tp1 = belowLevels.at(-1) ?? null;
-  const minTwoR = Number.isFinite(risk) ? entry1 - risk * 2 : null;
-  const tp2 = [...belowLevels].reverse().find((level) => level < (tp1 ?? entry1)) ?? minTwoR;
-  const rewardTp1 = Number.isFinite(tp1) ? entry1 - tp1 : null;
-  const rewardTp2 = Number.isFinite(tp2) ? entry1 - tp2 : null;
+  const atrStop = entry1 + atr * 1.5;
+  const sl = Number.isFinite(baseResistance) ? Math.max(atrStop, baseResistance) : atrStop;
+  const risk = sl - entry1;
+  const tp1 = entry1 - risk * 1.5;
+  const tp2 = entry1 - risk * 2.5;
+  const rewardTp1 = entry1 - tp1;
+  const rewardTp2 = entry1 - tp2;
+  const rrTp1 = risk > 0 ? rewardTp1 / risk : null;
+  const rrTp2 = risk > 0 ? rewardTp2 / risk : null;
 
   return {
     entry1,
@@ -301,9 +307,11 @@ function buildRiskLevels(direction, indicators) {
     risk,
     rewardTp1,
     rewardTp2,
-    rrTp1: Number.isFinite(rewardTp1) && Number.isFinite(risk) && risk > 0 ? rewardTp1 / risk : null,
-    rrTp2: Number.isFinite(rewardTp2) && Number.isFinite(risk) && risk > 0 ? rewardTp2 / risk : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
     slAtrMultiple: Number.isFinite(risk) ? risk / atr : null,
+    atr,
   };
 }
 
@@ -319,7 +327,7 @@ function levelQuality(direction, indicators) {
 
   if (direction === 'LONG') {
     return {
-      passed: (nearSupport || nearEma20 || nearEma50 || retestComplete) && (!Number.isFinite(resistanceDistance) || resistanceDistance > 0.8),
+      passed: (nearSupport || nearEma20 || nearEma50 || retestComplete) && (!Number.isFinite(resistanceDistance) || resistanceDistance > 1.5),
       resistanceDistance,
       supportDistance,
       reason: nearSupport
@@ -333,7 +341,7 @@ function levelQuality(direction, indicators) {
   }
 
   return {
-    passed: (nearResistance || nearEma20 || nearEma50 || retestComplete) && (!Number.isFinite(supportDistance) || supportDistance > 0.8),
+    passed: (nearResistance || nearEma20 || nearEma50 || retestComplete) && (!Number.isFinite(supportDistance) || supportDistance > 1.5),
     resistanceDistance,
     supportDistance,
     reason: nearResistance
@@ -503,16 +511,18 @@ function hardBlocks(direction, indicators, levels, regime, btcAdjustment, fundin
     reasons.push('RSI < 28 for SHORT.');
   }
 
-  if (direction === 'LONG' && Number.isFinite(checks.resistanceDistance) && checks.resistanceDistance <= 0.8) {
-    reasons.push('Price too close to resistance for LONG.');
+  if (direction === 'LONG' && Number.isFinite(checks.resistanceDistance) && checks.resistanceDistance <= 1) {
+    reasons.push('Price within 1% of resistance for LONG.');
   }
 
-  if (direction === 'SHORT' && Number.isFinite(checks.supportDistance) && checks.supportDistance <= 0.8) {
-    reasons.push('Price too close to support for SHORT.');
+  if (direction === 'SHORT' && Number.isFinite(checks.supportDistance) && checks.supportDistance <= 1) {
+    reasons.push('Price within 1% of support for SHORT.');
   }
 
-  if (!Number.isFinite(levels.rrTp1) || levels.rrTp1 < config.rrMin) {
-    reasons.push(`RR to TP1 is below ${config.rrMin.toFixed(1)} or target is unavailable.`);
+  if (!Number.isFinite(levels.rrTp1)) {
+    reasons.push('RR to TP1 is unavailable.');
+  } else if (levels.rrTp1 < 1.2) {
+    reasons.push(`R:R is only ${levels.rrTp1.toFixed(2)}:1, below hard minimum 1.2.`);
   }
 
   if (!Number.isFinite(levels.slAtrMultiple)) {
@@ -608,9 +618,9 @@ function buildCandidate(direction, indicators, options, marketRegime, config) {
   const levels = buildRiskLevels(direction, indicators);
   const rrPass =
     Number.isFinite(levels.rrTp1) &&
-    levels.rrTp1 >= config.rrMin &&
+    levels.rrTp1 >= 1.5 &&
     Number.isFinite(levels.rrTp2) &&
-    levels.rrTp2 >= 1.5;
+    levels.rrTp2 >= 2.5;
 
   const items = [
     scoreItem('ema', 'EMA trend alignment', trendPass ? 2 : 0, 2, trendPass, trendPass ? 'EMA trend aligned.' : 'EMA trend not aligned.'),
@@ -632,7 +642,7 @@ function buildCandidate(direction, indicators, options, marketRegime, config) {
       rrPass ? 1 : 0,
       1,
       rrPass,
-      `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min ${config.rrMin.toFixed(1)}), TP2 ${Number.isFinite(levels.rrTp2) ? levels.rrTp2.toFixed(2) : '--'}.`,
+      `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min 1.5), TP2 ${Number.isFinite(levels.rrTp2) ? levels.rrTp2.toFixed(2) : '--'} (target 2.5).`,
     ),
   ];
   const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
@@ -740,6 +750,36 @@ function buildSignalWarnings(indicators, selected) {
   }
 
   return unique([...warnings, ...(selected?.warnings ?? [])]);
+}
+
+function buildRrWarning(levels) {
+  if (!Number.isFinite(levels?.rrTp1) || levels.rrTp1 >= 1.5) {
+    return null;
+  }
+
+  return `R:R is only ${levels.rrTp1.toFixed(2)}:1, minimum required is 1.5. Consider skipping.`;
+}
+
+function buildLevelWarning(direction, indicators, checks) {
+  if (
+    direction === 'LONG' &&
+    Number.isFinite(checks?.resistanceDistance) &&
+    checks.resistanceDistance <= 1.5 &&
+    Number.isFinite(indicators?.resistance)
+  ) {
+    return `Price within 1.5% of resistance at ${indicators.resistance}. LONG setup quality reduced.`;
+  }
+
+  if (
+    direction === 'SHORT' &&
+    Number.isFinite(checks?.supportDistance) &&
+    checks.supportDistance <= 1.5 &&
+    Number.isFinite(indicators?.support)
+  ) {
+    return `Price within 1.5% of support at ${indicators.support}. SHORT setup quality reduced.`;
+  }
+
+  return null;
 }
 
 function actionForStatus(status, entryContext, direction) {
@@ -852,7 +892,12 @@ function buildNoTradeSetupFromDataProblem(indicators, options = {}) {
     rrRatio: null,
     rrTp1: null,
     rrTp2: null,
+    rrWarning: null,
+    levelWarning: null,
     atr: round(indicators?.atr),
+    slPrice: null,
+    tp1Price: null,
+    tp2Price: null,
     basis: [],
     tradeLevelsVisible: false,
     watchLevels: null,
@@ -901,7 +946,9 @@ export function buildSignalSetup(indicators, options = {}) {
   const blockedReason = unique(selected.blockedReasons ?? []);
   const signalValidity = classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
-  const warnings = unique([...buildSignalWarnings(indicators, selected), modeConfig.warning]);
+  const rrWarning = buildRrWarning(selected.levels);
+  const levelWarning = buildLevelWarning(selected.direction, indicators, selected.checks);
+  const warnings = unique([...buildSignalWarnings(indicators, selected), rrWarning, levelWarning, modeConfig.warning]);
   const executable = ['LONG', 'SHORT'].includes(finalSignal);
   const waitLike = ['WAIT', 'WAIT_RETEST'].includes(finalSignal);
   const rejectionReasons = unique(
@@ -945,11 +992,8 @@ export function buildSignalSetup(indicators, options = {}) {
     },
     hardBlock: selected.hardBlock,
     blockedReason,
-    rrWarning:
-      Number.isFinite(selected.levels.rrTp1) && selected.levels.rrTp1 < 1.2
-        ? `R:R to TP1 is only ${selected.levels.rrTp1.toFixed(2)}:1.`
-        : null,
-    levelWarning: selected.rejectionReasons.find((reason) => reason.includes('too close')) ?? null,
+    rrWarning,
+    levelWarning,
     warnings,
     rejectionReasons,
     stale: Boolean(indicators.stale || indicators.feedStale),
@@ -975,6 +1019,9 @@ export function buildSignalSetup(indicators, options = {}) {
     rrTp1: round(selected.levels.rrTp1),
     rrTp2: round(selected.levels.rrTp2),
     atr: round(atr),
+    slPrice: round(selected.levels.sl),
+    tp1Price: round(selected.levels.tp1),
+    tp2Price: round(selected.levels.tp2),
     layers: {
       trendBullish,
       trendBearish,
@@ -991,9 +1038,6 @@ export function buildSignalSetup(indicators, options = {}) {
     tp1: executable ? round(selected.levels.tp1) : null,
     tp2: executable ? round(selected.levels.tp2) : null,
     sl: executable ? round(selected.levels.sl) : null,
-    tp1Price: executable ? round(selected.levels.tp1) : null,
-    tp2Price: executable ? round(selected.levels.tp2) : null,
-    slPrice: executable ? round(selected.levels.sl) : null,
     plannedLevels: {
       entry1: round(selected.levels.entry1),
       entry2: round(selected.levels.entry2),

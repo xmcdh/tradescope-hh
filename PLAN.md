@@ -286,8 +286,11 @@ Live execution remains stubbed.
 - Check `/api/storage-status`
 - Check `/api/paper-health`
 - Open `/proof`
+- Open `/paper-trading`
 - Run `npm run proof:snapshot`
 - Run `npm run paper:report`
+- Confirm storage remains AUTHORITATIVE
 - Confirm live execution remains stubbed
+- Confirm global verdict remains NOT READY until all gates pass
 
 Authoritative paper tracking only counts approved durable trades after 2026-04-30. Observation-only, rejected, blocked, marginal, local-json, and pre-authoritative records do not count toward the 28-day live-readiness gate.

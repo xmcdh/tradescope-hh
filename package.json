@@ -10,6 +10,8 @@
     "backtest": "node src/scripts/runBacktest.js",
     "backtest:batch": "node src/scripts/runBacktestBatch.js",
     "backtest:report": "node src/scripts/generateBacktestReport.js",
+    "proof:snapshot": "node src/scripts/writeProofSnapshot.js",
+    "paper:report": "node src/scripts/generatePaperReport.js",
     "db:check": "node --env-file-if-exists=.env.local --env-file-if-exists=.env src/scripts/checkDatabase.js",
     "test:signal": "node --test tests/signalLogic.test.js"
   },

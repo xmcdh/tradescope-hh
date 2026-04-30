@@ -1,9 +1,14 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { readPaperTrades, getPaperTradeStorageStatus } from './paperTrader.js';
+import {
+  calculatePaperTrackingCountdown,
+  officialPaperTrackingStartTimestamp,
+  OFFICIAL_PAPER_TRACKING_MIN_DAYS,
+} from '../config/paperTrackingConfig.js';
 
 const MIN_CLOSED_TRADES = 30;
-const MIN_PAPER_DURATION_DAYS = 28;
+const MIN_PAPER_DURATION_DAYS = OFFICIAL_PAPER_TRACKING_MIN_DAYS;
 const WIN_RATE_THRESHOLD = 0.45;
 const EXPECTANCY_THRESHOLD = 0.3;
 const MAX_DRAWDOWN_THRESHOLD = 0.15;
@@ -41,24 +46,48 @@ function closedTradesOnly(trades) {
   return trades.filter((trade) => ['WIN', 'LOSS', 'EXPIRED'].includes(trade.status));
 }
 
-function computePaperStats(trades) {
-  const approvedTrades = (Array.isArray(trades) ? trades : []).filter(
-    (trade) => trade.isApprovedPaperTrade === true && trade.signalValidity === 'VALID',
+function tradeTimestamp(trade) {
+  const openedAt = Date.parse(trade.openedAt ?? trade.createdAt ?? '');
+  if (Number.isFinite(openedAt)) {
+    return openedAt;
+  }
+
+  return Number.isFinite(trade.timestamp) ? trade.timestamp : null;
+}
+
+function isApprovedOfficialTrade(trade, { storage }) {
+  const timestamp = tradeTimestamp(trade);
+
+  return (
+    Boolean(storage?.durable) &&
+    trade.isApprovedPaperTrade === true &&
+    trade.paperCategory === 'PAPER_ELIGIBLE' &&
+    trade.signalValidity === 'VALID' &&
+    trade.setupStatus === 'APPROVED_FOR_PAPER' &&
+    ['LONG', 'SHORT'].includes(trade.direction) &&
+    Number.isFinite(timestamp) &&
+    timestamp >= officialPaperTrackingStartTimestamp()
   );
+}
+
+function computePaperStats(trades, options = {}) {
+  const list = Array.isArray(trades) ? trades : [];
+  const countdown = calculatePaperTrackingCountdown(options.nowMs ?? Date.now());
+  const approvedTrades = list.filter((trade) => isApprovedOfficialTrade(trade, options));
   const closed = closedTradesOnly(approvedTrades);
   const wins = closed.filter((trade) => trade.status === 'WIN').length;
   const returns = closed.map((trade) => Number(trade.realizedR ?? 0)).filter(Number.isFinite);
-  const sortedByTime = [...approvedTrades].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
-  const firstTimestamp = sortedByTime[0]?.timestamp ?? null;
+  const sortedByTime = [...approvedTrades].sort((left, right) => (tradeTimestamp(left) ?? 0) - (tradeTimestamp(right) ?? 0));
+  const firstTimestamp = sortedByTime.length ? Math.max(tradeTimestamp(sortedByTime[0]) ?? countdown.startTimestamp, countdown.startTimestamp) : countdown.startTimestamp;
   const lastClosedTimestamp = closed
-    .map((trade) => trade.exitTimestamp ?? trade.timestamp)
+    .map((trade) => trade.exitTimestamp ?? tradeTimestamp(trade))
     .filter(Number.isFinite)
     .sort((left, right) => left - right)
     .at(-1) ?? null;
-  const durationDays =
-    Number.isFinite(firstTimestamp) && Number.isFinite(lastClosedTimestamp) && lastClosedTimestamp >= firstTimestamp
-      ? (lastClosedTimestamp - firstTimestamp) / (24 * 60 * 60 * 1000)
-      : 0;
+  const observationOnlyCount = list.filter((trade) => trade.paperCategory === 'OBSERVATION_ONLY').length;
+  const rejectedSetupCount = list.filter((trade) => trade.paperCategory === 'REJECTED_SETUP').length;
+  const blockedSignalCount = list.filter((trade) => trade.paperCategory === 'BLOCKED_SIGNAL').length;
+  const marginalCount = list.filter((trade) => trade.signalValidity === 'MARGINAL').length;
 
   return {
     totalSignals: approvedTrades.length,
@@ -68,18 +97,27 @@ function computePaperStats(trades) {
     avgR: mean(returns),
     maxDrawdown: equityDrawdownRatio(returns),
     openTrades: approvedTrades.filter((trade) => trade.status === 'OPEN').length,
-    durationDays,
+    durationDays: countdown.elapsedDays,
+    officialPaperTrackingStartDate: countdown.officialPaperTrackingStartDate,
+    paperDurationElapsedDays: countdown.elapsedDays,
+    paperDurationRemainingDays: countdown.remainingDays,
+    paperDurationMinDays: countdown.minDays,
     startTimestamp: firstTimestamp,
     lastClosedTimestamp,
+    approvedPaperTradesClosed: closed.length,
+    approvedPaperTradesOpen: approvedTrades.filter((trade) => trade.status === 'OPEN').length,
+    observationOnlyCount,
+    rejectedSetupCount,
+    blockedSignalCount,
+    marginalCount,
+    excludedCount: list.length - approvedTrades.length,
   };
 }
 
-function perSetupCounts(trades) {
+function perSetupCounts(trades, options = {}) {
   const counts = new Map();
 
-  closedTradesOnly(
-    trades.filter((trade) => trade.signalValidity === 'VALID' && trade.isApprovedPaperTrade === true),
-  ).forEach((trade) => {
+  closedTradesOnly(trades.filter((trade) => isApprovedOfficialTrade(trade, options))).forEach((trade) => {
     const key = `${trade.pair}:${trade.timeframe}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   });
@@ -156,9 +194,9 @@ function buildBacktestVsPaper(backtestSummary, paperStats) {
   };
 }
 
-export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = null, storage = null, slippageEstimate = null }) {
-  const baseStats = computePaperStats(trades ?? []);
-  const authoritativeDurationDays = storage?.durable ? baseStats.durationDays : 0;
+export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = null, storage = null, slippageEstimate = null, nowMs = Date.now() }) {
+  const baseStats = computePaperStats(trades ?? [], { storage, nowMs });
+  const authoritativeDurationDays = storage?.durable ? baseStats.paperDurationElapsedDays : 0;
   const stats = {
     ...baseStats,
     oosDegradation: Number.isFinite(oosDegradation) ? oosDegradation : backtestComparison?.oosDegradation ?? null,
@@ -170,7 +208,7 @@ export function evaluateLiveGate({ trades, oosDegradation, backtestComparison = 
   };
   const failedCriteria = [];
   const durationPassed = authoritativeDurationDays >= MIN_PAPER_DURATION_DAYS;
-  const setupSamples = perSetupCounts(trades ?? []);
+  const setupSamples = perSetupCounts(trades ?? [], { storage });
   const suggestedSetupWarnings = Object.entries(setupSamples)
     .filter(([, count]) => count < 50)
     .map(([setup, count]) => `SETUP_SAMPLE_LOW (${setup} ${count}/50)`);

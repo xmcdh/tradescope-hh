@@ -2,14 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { evaluateLiveGate } from '../src/lib/liveGate.js';
 
+const OFFICIAL_START = Date.parse('2026-04-30T00:00:00.000Z');
+const AFTER_28_DAYS = OFFICIAL_START + 29 * 24 * 60 * 60 * 1000;
+
 function makeTrades({
   count = 30,
   wins = 18,
   rWin = 1.4,
   rLoss = -0.6,
   validity = 'VALID',
-  start = 1_700_000_000_000,
+  start = OFFICIAL_START,
   spacingMs = 24 * 60 * 60 * 1000,
+  approved = true,
+  paperCategory = 'PAPER_ELIGIBLE',
+  setupStatus = 'APPROVED_FOR_PAPER',
+  direction = 'LONG',
 } = {}) {
   return Array.from({ length: count }).map((_, index) => {
     const isWin = index < wins;
@@ -18,10 +25,14 @@ function makeTrades({
       pair: index % 2 ? 'BTCUSDT' : 'ETHUSDT',
       timeframe: index % 3 ? '15m' : '1h',
       signalValidity: validity,
-      isApprovedPaperTrade: true,
+      setupStatus,
+      paperCategory,
+      direction,
+      isApprovedPaperTrade: approved,
       status: isWin ? 'WIN' : 'LOSS',
       realizedR: isWin ? rWin : rLoss,
       timestamp: start + index * spacingMs,
+      openedAt: new Date(start + index * spacingMs).toISOString(),
       exitTimestamp: start + index * spacingMs + 60_000,
     };
   });
@@ -32,6 +43,7 @@ function passingContext(overrides = {}) {
     trades: makeTrades({ count: 30, wins: 18, rWin: 1.3, rLoss: -0.3 }),
     oosDegradation: 0.1,
     storage: { durable: true, warning: '' },
+    nowMs: AFTER_28_DAYS,
     backtestComparison: {
       proofStatus: 'PROVEN_READY_FOR_PAPER',
       oosDegradation: 0.1,
@@ -46,6 +58,86 @@ test('evaluateLiveGate passes when all criteria are met', () => {
 
   assert.equal(result.ready, true);
   assert.deepEqual(result.failedCriteria, []);
+});
+
+test('evaluateLiveGate excludes pre-start-date paper trades', () => {
+  const result = evaluateLiveGate(passingContext({
+    trades: makeTrades({
+      count: 30,
+      wins: 18,
+      rWin: 1.3,
+      rLoss: -0.3,
+      start: OFFICIAL_START - 40 * 24 * 60 * 60 * 1000,
+    }),
+  }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.ok(result.failedCriteria.some((item) => item.startsWith('MIN_CLOSED_TRADES')));
+});
+
+test('evaluateLiveGate excludes observation-only trades', () => {
+  const result = evaluateLiveGate(passingContext({
+    trades: makeTrades({
+      count: 30,
+      wins: 18,
+      approved: false,
+      paperCategory: 'OBSERVATION_ONLY',
+      setupStatus: 'COLLECT_MORE_DATA',
+    }),
+  }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.equal(result.stats.observationOnlyCount, 30);
+});
+
+test('evaluateLiveGate excludes rejected setup trades', () => {
+  const result = evaluateLiveGate(passingContext({
+    trades: makeTrades({
+      count: 30,
+      wins: 18,
+      approved: false,
+      paperCategory: 'REJECTED_SETUP',
+      setupStatus: 'REJECTED_OOS_FAILURE',
+    }),
+  }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.equal(result.stats.rejectedSetupCount, 30);
+});
+
+test('evaluateLiveGate excludes blocked signals', () => {
+  const result = evaluateLiveGate(passingContext({
+    trades: makeTrades({
+      count: 30,
+      wins: 18,
+      approved: false,
+      validity: 'BLOCKED',
+      paperCategory: 'BLOCKED_SIGNAL',
+      setupStatus: 'APPROVED_FOR_PAPER',
+    }),
+  }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.equal(result.stats.blockedSignalCount, 30);
+});
+
+test('evaluateLiveGate excludes approved-looking trades when storage is non-durable', () => {
+  const result = evaluateLiveGate(passingContext({
+    storage: { durable: false, warning: 'Storage is using /tmp fallback.' },
+  }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.ok(result.failedCriteria.includes('STORAGE_NOT_DURABLE'));
+});
+
+test('evaluateLiveGate exposes countdown fields', () => {
+  const result = evaluateLiveGate(passingContext({
+    nowMs: OFFICIAL_START + 9 * 24 * 60 * 60 * 1000,
+  }));
+
+  assert.equal(result.stats.officialPaperTrackingStartDate, '2026-04-30');
+  assert.equal(result.stats.paperDurationElapsedDays, 9);
+  assert.equal(result.stats.paperDurationRemainingDays, 19);
 });
 
 test('evaluateLiveGate fails minimum trade count gate', () => {
@@ -101,6 +193,7 @@ test('evaluateLiveGate fails OOS degradation gate', () => {
 test('evaluateLiveGate fails paper duration gate', () => {
   const result = evaluateLiveGate(passingContext({
     trades: makeTrades({ count: 30, wins: 18, spacingMs: 60_000 }),
+    nowMs: OFFICIAL_START + 60_000,
   }));
 
   assert.equal(result.ready, false);

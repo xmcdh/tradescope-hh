@@ -137,7 +137,7 @@ export default function PaperTradingPage() {
             : 'border-[var(--accent-red)]/30 bg-[var(--accent-red)]/10'
         }`}>
           <div className={`text-lg font-semibold ${gate?.paperGatePassed ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
-            {gate?.paperGatePassed ? 'Paper Gate Passed' : 'Not Ready'}
+            {gate?.paperGatePassed ? 'Paper Gate Passed' : 'Not ready for live trading'}
           </div>
           {!gate?.paperGatePassed && gate?.failedCriteria?.length ? (
             <div className="mt-2 text-sm text-[var(--text-secondary)]">
@@ -145,7 +145,34 @@ export default function PaperTradingPage() {
             </div>
           ) : null}
           <div className="mt-2 text-sm text-[var(--text-secondary)]">
-            This page does not imply live readiness. Only approved setups can produce paper-eligible trades.
+            Collecting authoritative paper data. Only approved setups count toward the paper gate; observation-only signals are logged but not counted.
+          </div>
+        </section>
+
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Official Day 1</div>
+            <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">{gateStats.officialPaperTrackingStartDate ?? '2026-04-30'}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Paper Duration</div>
+            <div className="mt-2 font-mono text-lg font-semibold text-[var(--text-primary)]">
+              {gateStats.paperDurationElapsedDays ?? 0} / {gateStats.paperDurationMinDays ?? 28} days
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Days Remaining</div>
+            <div className="mt-2 font-mono text-lg font-semibold text-[var(--text-primary)]">{gateStats.paperDurationRemainingDays ?? 28}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Approved Closed</div>
+            <div className="mt-2 font-mono text-lg font-semibold text-[var(--text-primary)]">
+              {gateStats.approvedPaperTradesClosed ?? 0} / {thresholds.minClosedTrades ?? 30}
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Eligible Setup</div>
+            <div className="mt-2 text-sm font-semibold text-[var(--text-primary)]">BTC/USDT 1h only</div>
           </div>
         </section>
 
@@ -153,15 +180,15 @@ export default function PaperTradingPage() {
           <div className="border-b border-[var(--border-subtle)] px-4 py-3 text-sm font-semibold">Gate Criteria</div>
           <GateRow
             label="Paper duration"
-            current={gateStats.authoritativeDurationDays != null ? `${gateStats.authoritativeDurationDays.toFixed(1)} days` : '--'}
+            current={`${gateStats.paperDurationElapsedDays ?? 0} days`}
             threshold={`>= ${thresholds.minPaperDurationDays ?? 28} days`}
-            passed={(gateStats.authoritativeDurationDays ?? 0) >= (thresholds.minPaperDurationDays ?? 28)}
+            passed={(gateStats.paperDurationElapsedDays ?? 0) >= (thresholds.minPaperDurationDays ?? 28)}
           />
           <GateRow
-            label="Closed paper trades"
-            current={gateStats.totalClosedTrades ?? 0}
+            label="Closed approved paper trades"
+            current={gateStats.approvedPaperTradesClosed ?? 0}
             threshold={`>= ${thresholds.minClosedTrades ?? 30}`}
-            passed={(gateStats.totalClosedTrades ?? 0) >= (thresholds.minClosedTrades ?? 30)}
+            passed={(gateStats.approvedPaperTradesClosed ?? 0) >= (thresholds.minClosedTrades ?? 30)}
           />
           <GateRow
             label="Win rate"
@@ -230,6 +257,12 @@ export default function PaperTradingPage() {
           </div>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
             <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Duration Source</div>
+            <div className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
+              {gate?.storage?.authoritative ? 'Durable Database' : 'Local JSON'}
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Paper Tracking Source</div>
             <div className="mt-2 text-sm font-semibold text-[var(--text-primary)]">
               {gate?.storage?.authoritative ? 'Durable Database' : 'Local JSON'}
             </div>

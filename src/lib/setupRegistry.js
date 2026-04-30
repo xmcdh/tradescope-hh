@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { DISABLED_SETUPS, normalizeSetupConfigKey } from '../config/disabledSetups.js';
+import { OFFICIAL_PAPER_SETUPS } from '../config/paperTrackingConfig.js';
 
 export const SETUP_STATUS = {
   APPROVED_FOR_PAPER: 'APPROVED_FOR_PAPER',
@@ -120,13 +121,70 @@ function buildRegistryEntry(setup, resultByKey, disabledMap) {
   };
 }
 
+function entryFromOfficialSetup(config, resultByKey, disabledMap) {
+  const pair = normalizePairDisplay(config.pair);
+  const timeframe = String(config.timeframe ?? '').toLowerCase();
+  const symbolKey = toSetupSymbolKey(pair, timeframe);
+  const result = resultByKey.get(symbolKey) ?? null;
+  const metrics = result?.backtest ?? {};
+  const validationFlags = result?.validation?.flags ?? [];
+  const setupStatus = config.setupStatus;
+  const oosStatus =
+    config.setupStatus === SETUP_STATUS.REJECTED_OOS_FAILURE
+      ? 'FAILED_OOS'
+      : validationFlags.length
+        ? validationFlags.join(', ')
+        : config.setupStatus === SETUP_STATUS.APPROVED_FOR_PAPER
+          ? 'PASS'
+          : 'REVIEW';
+  const disabledReason = disabledMap.get(symbolKey) ?? null;
+  const finalStatus = disabledReason ? SETUP_STATUS.DISABLED_MANUAL : setupStatus;
+
+  return {
+    key: `${pair}:${timeframe}`,
+    symbolKey,
+    pair,
+    timeframe,
+    proofStatus: config.proofStatus,
+    setupStatus: finalStatus,
+    actionableTrades: metrics.actionableClosedTradeCount ?? 0,
+    expectancy: metrics.actionableExpectancy ?? 0,
+    winRate: metrics.actionableWinRate ?? 0,
+    maxDrawdown: metrics.actionableMaxDrawdown ?? 0,
+    oosStatus,
+    recommendation: disabledReason || config.recommendation || recommendationForSetupStatus(finalStatus),
+    failedCriteria: [],
+    rejectionReason:
+      disabledReason ??
+      (finalStatus === SETUP_STATUS.APPROVED_FOR_PAPER ? '' : config.recommendation || 'Setup is not approved for paper trading.'),
+  };
+}
+
 export function buildSetupRegistry(summary, options = {}) {
   const proof = summary?.proof ?? null;
   const disabledMap = manualDisableMap(options.disabledSetups);
   const resultByKey = new Map(
     (summary?.results ?? []).map((item) => [toSetupSymbolKey(item.pair, item.timeframe), item]),
   );
-  const entries = (proof?.setups ?? []).map((setup) => buildRegistryEntry(setup, resultByKey, disabledMap));
+  const officialKeys = new Set(OFFICIAL_PAPER_SETUPS.map((item) => toSetupSymbolKey(item.pair, item.timeframe)));
+  const proofEntries = (proof?.setups ?? [])
+    .map((setup) => buildRegistryEntry(setup, resultByKey, disabledMap))
+    .filter((entry) => officialKeys.has(entry.symbolKey));
+  const byProofKey = new Map(proofEntries.map((entry) => [entry.symbolKey, entry]));
+  const entries = OFFICIAL_PAPER_SETUPS.map((config) => {
+    const symbolKey = toSetupSymbolKey(config.pair, config.timeframe);
+    const fromProof = byProofKey.get(symbolKey);
+    const official = entryFromOfficialSetup(config, resultByKey, disabledMap);
+
+    return {
+      ...official,
+      actionableTrades: fromProof?.actionableTrades ?? official.actionableTrades,
+      expectancy: fromProof?.expectancy ?? official.expectancy,
+      winRate: fromProof?.winRate ?? official.winRate,
+      maxDrawdown: fromProof?.maxDrawdown ?? official.maxDrawdown,
+      oosStatus: fromProof?.oosStatus ?? official.oosStatus,
+    };
+  });
   const bySymbolKey = Object.fromEntries(entries.map((entry) => [entry.symbolKey, entry]));
   const counts = {
     approved: entries.filter((entry) => entry.setupStatus === SETUP_STATUS.APPROVED_FOR_PAPER).length,

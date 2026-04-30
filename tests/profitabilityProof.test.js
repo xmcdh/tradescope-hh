@@ -141,7 +141,7 @@ test('report generator markdown includes final verdict and setup section', () =>
   assert.equal(verdict, 'NOT READY');
   assert.match(markdown, /Final verdict: \*\*NOT READY\*\*/);
   assert.match(markdown, /\| Pair \| Timeframe \| Proof Status \| Setup Status \|/);
-  assert.match(markdown, /Continue paper trading/);
+  assert.match(markdown, /Continue official paper trading/);
   assert.match(markdown, /## Why Not Ready Yet/);
   assert.match(markdown, /\| BTC\/USDT \| 1h \| PROVEN_READY_FOR_PAPER \| APPROVED_FOR_PAPER \|/);
 });

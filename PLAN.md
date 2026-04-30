@@ -246,3 +246,37 @@ Confidence: 🔥 HIGH (3/3)
 2. Semua analisis AI dilakukan lewat prompt yang dicopy manual ke AI pilihan user.
 3. Pair seperti `UB`, `BAS`, `CHIP` bisa fallback ke Bybit bila Binance tidak punya datanya.
 4. Ini alat bantu analisis pribadi dan tetap butuh validasi manual serta manajemen risiko.
+
+## Official Paper Trading Phase
+
+Official Paper Tracking Day 1: 2026-04-30
+
+Authoritative storage is now active:
+- Storage Mode: database
+- Provider: postgres
+- Can Connect: true
+- Authority: AUTHORITATIVE
+- Durable: true
+
+Only these trades count toward the 28-day paper gate:
+- APPROVED_FOR_PAPER setup
+- VALID signal
+- LONG or SHORT direction
+- stored in durable Postgres database
+- opened after Official Paper Tracking Day 1
+
+Current setup status:
+- BTC/USDT 1h: PAPER ELIGIBLE
+- ETH/USDT 1h: OBSERVATION ONLY / COLLECT_MORE_DATA
+- SOL/USDT 15m: REJECTED_OOS_FAILURE
+
+Global verdict remains NOT READY until:
+- 28 days of authoritative approved paper trading are complete
+- minimum closed trade requirement passes
+- paper win rate > 45%
+- paper expectancy > 0.3R
+- paper max drawdown < 15%
+- paper vs backtest divergence is acceptable
+- backtest proof / OOS / walk-forward gates remain valid
+
+Live execution remains stubbed.

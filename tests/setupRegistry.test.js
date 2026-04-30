@@ -64,6 +64,15 @@ test('setupRegistry classifies approved, collecting, and rejected setups indepen
   assert.equal(registry.bySymbolKey['SOLUSDT:15m'].setupStatus, SETUP_STATUS.REJECTED_OOS_FAILURE);
 });
 
+test('setupRegistry freezes the official paper universe when no backtest summary exists', () => {
+  const registry = buildSetupRegistry(null);
+
+  assert.equal(registry.entries.length, 3);
+  assert.equal(registry.bySymbolKey['BTCUSDT:1h'].setupStatus, SETUP_STATUS.APPROVED_FOR_PAPER);
+  assert.equal(registry.bySymbolKey['ETHUSDT:1h'].setupStatus, SETUP_STATUS.COLLECT_MORE_DATA);
+  assert.equal(registry.bySymbolKey['SOLUSDT:15m'].setupStatus, SETUP_STATUS.REJECTED_OOS_FAILURE);
+});
+
 test('rejected OOS setup cannot enter approved paper trading', () => {
   const approval = classifySignalForPaper({
     setupStatus: SETUP_STATUS.REJECTED_OOS_FAILURE,

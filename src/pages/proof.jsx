@@ -64,6 +64,7 @@ export default function ProofPage() {
   const proof = payload?.proof;
   const liveGate = payload?.liveGate;
   const setupRegistry = payload?.setupRegistry;
+  const stats = liveGate?.stats ?? {};
 
   return (
     <main className="min-h-screen bg-[var(--bg-primary)] px-4 py-6 text-[var(--text-primary)] md:px-6">
@@ -92,10 +93,43 @@ export default function ProofPage() {
           <div className="mt-2 text-sm text-[var(--text-secondary)]">
             {payload?.readyForLive
               ? 'All proof gates currently pass.'
-              : 'Live deployment remains blocked until every validation gate and durable storage requirement passes.'}
+              : 'Not ready for live trading. Collecting authoritative paper data.'}
           </div>
           <div className="mt-2 text-sm text-[var(--text-secondary)]">
-            Only approved setups are eligible for paper trading. Passing one setup does not approve the entire strategy.
+            Only approved setups count toward the paper gate. Observation-only signals are logged but not counted.
+          </div>
+        </section>
+
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Official Day 1</div>
+            <div className="mt-2 text-lg font-semibold text-[var(--text-primary)]">
+              {stats.officialPaperTrackingStartDate ?? '2026-04-30'}
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Paper Duration</div>
+            <div className="mt-2 font-mono text-lg font-semibold text-[var(--text-primary)]">
+              {stats.paperDurationElapsedDays ?? 0} / {stats.paperDurationMinDays ?? 28} days
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Days Remaining</div>
+            <div className="mt-2 font-mono text-lg font-semibold text-[var(--text-primary)]">
+              {stats.paperDurationRemainingDays ?? 28}
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Approved Closed</div>
+            <div className="mt-2 font-mono text-lg font-semibold text-[var(--text-primary)]">
+              {stats.approvedPaperTradesClosed ?? 0} / {liveGate?.thresholds?.minClosedTrades ?? 30}
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Approved Open</div>
+            <div className="mt-2 font-mono text-lg font-semibold text-[var(--text-primary)]">
+              {stats.approvedPaperTradesOpen ?? 0}
+            </div>
           </div>
         </section>
 
@@ -163,6 +197,23 @@ export default function ProofPage() {
           ))}
         </section>
 
+        <section className="grid gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Observation Only</div>
+            <div className="mt-2 font-mono text-2xl font-semibold text-[var(--text-primary)]">{stats.observationOnlyCount ?? 0}</div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Rejected / Blocked</div>
+            <div className="mt-2 font-mono text-2xl font-semibold text-[var(--text-primary)]">
+              {(stats.rejectedSetupCount ?? 0) + (stats.blockedSignalCount ?? 0)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-card)] p-4">
+            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Eligible Universe</div>
+            <div className="mt-2 text-sm font-semibold text-[var(--text-primary)]">BTC/USDT 1h only</div>
+          </div>
+        </section>
+
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {[
             ['Approved Setups', setupRegistry?.counts?.approved ?? 0],
@@ -187,11 +238,11 @@ export default function ProofPage() {
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span>Paper duration &gt;= 4 weeks</span>
-                <GateBadge passed={Boolean(liveGate?.paperDurationPassed)} label={liveGate?.paperDurationPassed ? 'PASS' : 'FAIL'} />
+                <GateBadge passed={Boolean(liveGate?.paperDurationPassed)} label={`${stats.paperDurationElapsedDays ?? 0}/${stats.paperDurationMinDays ?? 28}`} />
               </div>
               <div className="flex items-center justify-between gap-3">
-                <span>Closed paper trades &gt;= 30</span>
-                <GateBadge passed={(liveGate?.stats?.totalClosedTrades ?? 0) >= 30} label={`${liveGate?.stats?.totalClosedTrades ?? 0}`} />
+                <span>Closed approved paper trades &gt;= 30</span>
+                <GateBadge passed={(stats.approvedPaperTradesClosed ?? 0) >= 30} label={`${stats.approvedPaperTradesClosed ?? 0}`} />
               </div>
               <div className="flex items-center justify-between gap-3">
                 <span>Durable storage configured</span>

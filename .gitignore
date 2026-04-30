@@ -1,6 +1,7 @@
 node_modules
 dist
 backtest-results
+paper-results
 data/signal-log.json
 data/paper-trades.json
 data/proof-snapshots.json

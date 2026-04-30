@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createStorageAdapter, inspectStorageEnv } from '../src/lib/storageAdapter.js';
 import { classifySignalForPaper, SETUP_STATUS } from '../src/lib/setupRegistry.js';
 import { inspectDatabaseSchema } from '../src/scripts/checkDatabase.js';
+import { paperProofReportMarkdown } from '../src/lib/paperProofReport.js';
 
 function healthyPoolFactory() {
   return {
@@ -300,4 +301,50 @@ test('db:check reports missing tables and columns', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.canConnect, true);
   assert.ok(result.tables.some((table) => table.exists === false || table.missingColumns.length > 0));
+});
+
+test('paper proof report markdown includes official start and non-gate categories', () => {
+  const markdown = paperProofReportMarkdown({
+    generatedAt: '2026-04-30T00:00:00.000Z',
+    officialPaperTrackingStartDate: '2026-04-30',
+    finalVerdict: 'NOT READY',
+    storage: {
+      mode: 'database',
+      provider: 'postgres',
+      canConnect: true,
+      authority: 'AUTHORITATIVE',
+      durable: true,
+    },
+    eligibleSetups: [
+      {
+        pair: 'BTC/USDT',
+        timeframe: '1h',
+        setupStatus: 'APPROVED_FOR_PAPER',
+        recommendation: 'Continue official paper trading',
+      },
+    ],
+    approvedOnlyMetrics: {
+      durationDays: 0,
+      remainingDays: 28,
+      open: 0,
+      closed: 0,
+      winRate: 0,
+      expectancy: 0,
+      maxDrawdown: 0,
+    },
+    countdown: {
+      minDays: 28,
+    },
+    categoryBreakdown: {
+      observationOnly: { total: 2 },
+      rejected: { total: 1 },
+      blocked: { total: 3 },
+    },
+    whyNotReady: ['MIN_CLOSED_TRADES (0/30)'],
+  });
+
+  assert.match(markdown, /Official Paper Tracking Day 1: 2026-04-30/);
+  assert.match(markdown, /BTC\/USDT 1h: APPROVED_FOR_PAPER/);
+  assert.match(markdown, /Observation-only total: 2/);
+  assert.match(markdown, /Final verdict: NOT READY/);
 });

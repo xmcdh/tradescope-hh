@@ -238,6 +238,21 @@ test('evaluateLiveGate excludes old version trades from ATR proof', () => {
   assert.ok(result.failedCriteria.some((item) => item.startsWith('MIN_CLOSED_TRADES')));
 });
 
+test('evaluateLiveGate ignores experimental strategy trades', () => {
+  const experimentTrades = makeTrades({ count: 30, wins: 24 }).map((trade) => ({
+    ...trade,
+    strategyVersion: 'v1.6-impulse-filter-soft',
+    experimentId: 'v1.6-impulse-filter-soft',
+    candidateOnly: true,
+    backtestOnly: true,
+  }));
+  const result = evaluateLiveGate(passingContext({ trades: experimentTrades }));
+
+  assert.equal(result.stats.totalClosedTrades, 0);
+  assert.equal(result.stats.excludedHistoricalCount, 30);
+  assert.ok(result.failedCriteria.some((item) => item.startsWith('MIN_CLOSED_TRADES')));
+});
+
 test('evaluateLiveGate does not mark ATR live ready without fresh backtest proof', () => {
   const result = evaluateLiveGate(passingContext({
     backtestComparison: {

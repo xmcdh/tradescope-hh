@@ -1,6 +1,20 @@
 const SCORE_MAX = 10;
 const FUNDING_CROWDED = 0.0005;
 const FUNDING_EXTREME = 0.001;
+export const V2_BREAKOUT_BLOCK_REASONS = {
+  NO_COMPRESSION: 'NO_COMPRESSION',
+  NO_BREAKOUT: 'NO_BREAKOUT',
+  WEAK_VOLUME_EXPANSION: 'WEAK_VOLUME_EXPANSION',
+  WEAK_RANGE_EXPANSION: 'WEAK_RANGE_EXPANSION',
+  BODY_TOO_SMALL: 'BODY_TOO_SMALL',
+  REJECTION_WICK_TOO_LARGE: 'REJECTION_WICK_TOO_LARGE',
+  OPPOSING_LEVEL_TOO_CLOSE: 'OPPOSING_LEVEL_TOO_CLOSE',
+  RR_TOO_LOW: 'RR_TOO_LOW',
+  ATR_MISSING: 'ATR_MISSING',
+  LEVELS_INVALID: 'LEVELS_INVALID',
+  OTHER: 'OTHER',
+};
+
 export const SIGNAL_MODE_CONFIG = {
   conservative: {
     label: 'Conservative',
@@ -136,8 +150,8 @@ function macdConfirmed(direction, macd) {
   }
 
   return direction === 'LONG'
-    ? macd.macd > macd.signal && macd.histogram > 0
-    : macd.macd < macd.signal && macd.histogram < 0;
+    ? macd.MACD > macd.signal && macd.histogram > 0
+    : macd.MACD < macd.signal && macd.histogram < 0;
 }
 
 function rsiValid(direction, rsi) {
@@ -195,8 +209,8 @@ function detectMarketRegime(indicators) {
     return 'LOW_VOLUME';
   }
 
-  const trendingUp = price > ema20 && ema20 > ema50 && ema50 > ema200 && rsi > 50 && macd.macd > macd.signal;
-  const trendingDown = price < ema20 && ema20 < ema50 && ema50 < ema200 && rsi < 50 && macd.macd < macd.signal;
+  const trendingUp = price > ema20 && ema20 > ema50 && ema50 > ema200 && rsi > 50 && macd.MACD > macd.signal;
+  const trendingDown = price < ema20 && ema20 < ema50 && ema50 < ema200 && rsi < 50 && macd.MACD < macd.signal;
 
   if (trendingUp) {
     return 'TRENDING_UP';
@@ -206,7 +220,7 @@ function detectMarketRegime(indicators) {
     return 'TRENDING_DOWN';
   }
 
-  const macdUnclear = Math.abs(macd.macd - macd.signal) <= Math.abs(price) * 0.00015;
+  const macdUnclear = Math.abs(macd.MACD - macd.signal) <= Math.abs(price) * 0.00015;
   const rsiNeutral = rsi >= 45 && rsi <= 55;
   const noBreakout = !marketStructure?.bos?.detected;
 
@@ -221,7 +235,7 @@ function levelCandidates(values, predicate) {
   return unique(values.filter(Number.isFinite).filter(predicate)).sort((left, right) => left - right);
 }
 
-function buildRiskLevels(direction, indicators) {
+function buildRiskLevels(direction, indicators, config = {}) {
   const {
     price,
     support,
@@ -235,6 +249,9 @@ function buildRiskLevels(direction, indicators) {
   const fallbackPullback = direction === 'LONG' ? price - atr * 0.5 : price + atr * 0.5;
   const swingHighs = marketStructure?.swingHighs ?? [];
   const swingLows = marketStructure?.swingLows ?? [];
+  const atrStopMultiplier = Number.isFinite(Number(config.atrStopMultiplier)) ? Number(config.atrStopMultiplier) : 1.5;
+  const tp1RTarget = Number.isFinite(Number(config.tp1RTarget)) ? Number(config.tp1RTarget) : 1.5;
+  const tp2RTarget = Number.isFinite(Number(config.tp2RTarget)) ? Number(config.tp2RTarget) : 2.5;
 
   if (!isFinitePositive(price) || !isFinitePositive(atr)) {
     return {
@@ -258,11 +275,11 @@ function buildRiskLevels(direction, indicators) {
     const belowLevels = levelCandidates([support, ema20, ema50, ...swingLows], (level) => level < price);
     const baseSupport = belowLevels.at(-1);
     const entry2 = Number.isFinite(baseSupport) ? baseSupport : fallbackPullback;
-    const atrStop = entry1 - atr * 1.5;
+    const atrStop = entry1 - atr * atrStopMultiplier;
     const sl = Number.isFinite(baseSupport) ? Math.min(atrStop, baseSupport) : atrStop;
     const risk = entry1 - sl;
-    const tp1 = entry1 + risk * 1.5;
-    const tp2 = entry1 + risk * 2.5;
+    const tp1 = entry1 + risk * tp1RTarget;
+    const tp2 = entry1 + risk * tp2RTarget;
     const rewardTp1 = tp1 - entry1;
     const rewardTp2 = tp2 - entry1;
     const rrTp1 = risk > 0 ? rewardTp1 / risk : null;
@@ -288,11 +305,11 @@ function buildRiskLevels(direction, indicators) {
   const aboveLevels = levelCandidates([resistance, ema20, ema50, ...swingHighs], (level) => level > price);
   const baseResistance = aboveLevels[0];
   const entry2 = Number.isFinite(baseResistance) ? baseResistance : fallbackPullback;
-  const atrStop = entry1 + atr * 1.5;
+  const atrStop = entry1 + atr * atrStopMultiplier;
   const sl = Number.isFinite(baseResistance) ? Math.max(atrStop, baseResistance) : atrStop;
   const risk = sl - entry1;
-  const tp1 = entry1 - risk * 1.5;
-  const tp2 = entry1 - risk * 2.5;
+  const tp1 = entry1 - risk * tp1RTarget;
+  const tp2 = entry1 - risk * tp2RTarget;
   const rewardTp1 = entry1 - tp1;
   const rewardTp2 = entry1 - tp2;
   const rrTp1 = risk > 0 ? rewardTp1 / risk : null;
@@ -372,6 +389,960 @@ function volumeQuality(indicators) {
           : ratio >= 1
             ? `Volume normal ${ratio.toFixed(2)}x average.`
             : `Volume weak ${ratio.toFixed(2)}x average.`,
+    };
+}
+
+function lastMacdImproving(direction, macdSeriesTail) {
+  if (!Array.isArray(macdSeriesTail) || macdSeriesTail.length < 2) {
+    return false;
+  }
+
+  const previous = macdSeriesTail.at(-2)?.histogram;
+  const current = macdSeriesTail.at(-1)?.histogram;
+  if (!Number.isFinite(previous) || !Number.isFinite(current)) {
+    return false;
+  }
+
+  return direction === 'LONG' ? current > previous : current < previous;
+}
+
+function candleDirectionPass(direction, lastCandle, previousCandle) {
+  if (!lastCandle || !previousCandle) {
+    return false;
+  }
+
+  if (direction === 'LONG') {
+    return lastCandle.close > lastCandle.open && lastCandle.close > previousCandle.close;
+  }
+
+  return lastCandle.close < lastCandle.open && lastCandle.close < previousCandle.close;
+}
+
+function touchedLevelWithinPercent(candle, level, percent, direction) {
+  if (!candle || !Number.isFinite(level) || level <= 0) {
+    return false;
+  }
+
+  const tolerance = level * (percent / 100);
+  return direction === 'LONG' ? candle.low <= level + tolerance : candle.high >= level - tolerance;
+}
+
+function trendPullbackQuality(direction, indicators, config) {
+  const { price, ema20, ema50, support, resistance, recentCandles = [] } = indicators;
+  const tolerance = Number.isFinite(Number(config.pullbackTolerancePercent))
+    ? Number(config.pullbackTolerancePercent)
+    : 0.85;
+  const lookback = recentCandles.slice(-6);
+  const touchedEma20 = lookback.some((candle) => touchedLevelWithinPercent(candle, ema20, tolerance, direction));
+  const touchedEma50 = lookback.some((candle) => touchedLevelWithinPercent(candle, ema50, tolerance, direction));
+  const touchedStructure =
+    direction === 'LONG'
+      ? lookback.some((candle) => touchedLevelWithinPercent(candle, support, tolerance, direction))
+      : lookback.some((candle) => touchedLevelWithinPercent(candle, resistance, tolerance, direction));
+  const nearEma20 = pctDistance(price, ema20) <= tolerance * 1.25;
+  const nearEma50 = pctDistance(price, ema50) <= tolerance * 1.75;
+
+  return {
+    passed: touchedEma20 || touchedEma50 || touchedStructure || nearEma20 || nearEma50,
+    touchedEma20,
+    touchedEma50,
+    touchedStructure,
+    reason: touchedEma20
+      ? 'Pullback touched EMA20 value zone.'
+      : touchedEma50
+        ? 'Pullback touched EMA50 value zone.'
+        : touchedStructure
+          ? 'Pullback touched structure value zone.'
+          : nearEma20 || nearEma50
+            ? 'Price remains near EMA pullback zone.'
+            : 'No controlled pullback into value zone.',
+  };
+}
+
+function trendPullbackRoom(direction, indicators, config) {
+  const { price, support, resistance, ema20, ema50 } = indicators;
+  const minRoomToLevelPercent = Number.isFinite(Number(config.minRoomToLevelPercent))
+    ? Number(config.minRoomToLevelPercent)
+    : 0.9;
+  const resistanceDistance = distanceAbovePercent(price, resistance);
+  const supportDistance = distanceBelowPercent(price, support);
+  const nearEma20 = pctDistance(price, ema20) <= 1.2;
+  const nearEma50 = pctDistance(price, ema50) <= 1.8;
+  const hasRoom =
+    direction === 'LONG'
+      ? !Number.isFinite(resistanceDistance) || resistanceDistance >= minRoomToLevelPercent
+      : !Number.isFinite(supportDistance) || supportDistance >= minRoomToLevelPercent;
+
+  return {
+    passed: hasRoom && (nearEma20 || nearEma50),
+    resistanceDistance,
+    supportDistance,
+    reason: hasRoom
+      ? 'Entry has room from nearby opposing level.'
+      : direction === 'LONG'
+        ? 'LONG would enter too close to resistance.'
+        : 'SHORT would enter too close to support.',
+  };
+}
+
+function seriesSlopePercent(series, lookback) {
+  if (!Array.isArray(series) || series.length <= lookback) {
+    return null;
+  }
+
+  const current = Number(series.at(-1)?.value);
+  const previous = Number(series.at(-1 - lookback)?.value);
+  return percentMove(previous, current);
+}
+
+function trendStrengthQuality(direction, indicators, config) {
+  const filter = config.qualityFilters?.trendStrength;
+  if (!filter?.enabled) {
+    return null;
+  }
+
+  const lookback = Number.isFinite(Number(filter.ema20SlopeLookback)) ? Number(filter.ema20SlopeLookback) : 8;
+  const minSlope = Number.isFinite(Number(filter.minEma20SlopePercent)) ? Number(filter.minEma20SlopePercent) : 0.12;
+  const minSeparation = Number.isFinite(Number(filter.minEma20Ema50SeparationPercent))
+    ? Number(filter.minEma20Ema50SeparationPercent)
+    : 0.18;
+  const slope = seriesSlopePercent(indicators.ema20Series, lookback);
+  const separation = pctDistance(indicators.ema20, indicators.ema50);
+  const slopePass = direction === 'LONG' ? Number.isFinite(slope) && slope >= minSlope : Number.isFinite(slope) && slope <= -minSlope;
+  const separationPass = Number.isFinite(separation) && separation >= minSeparation;
+  const passed = slopePass && separationPass;
+
+  return {
+    key: 'trendStrength',
+    passed,
+    reason: passed
+      ? `Trend strength passed: EMA20 slope ${slope.toFixed(3)}%, EMA20/50 separation ${separation.toFixed(3)}%.`
+      : `Trend strength failed: EMA20 slope ${Number.isFinite(slope) ? slope.toFixed(3) : '--'}%, EMA20/50 separation ${Number.isFinite(separation) ? separation.toFixed(3) : '--'}%.`,
+  };
+}
+
+function htfAlignmentQuality(direction, indicators, config) {
+  const filter = config.qualityFilters?.htfAlignment;
+  if (!filter?.enabled) {
+    return null;
+  }
+
+  const requiredTimeframe = filter.mapping?.[indicators.timeframe];
+  if (!requiredTimeframe) {
+    return {
+      key: 'htfAlignment',
+      passed: true,
+      reason: `HTF alignment not required for ${indicators.timeframe}.`,
+    };
+  }
+
+  const htf = indicators.higherTimeframeTrend;
+  if (!htf || htf.timeframe !== requiredTimeframe) {
+    return {
+      key: 'htfAlignment',
+      passed: false,
+      reason: `HTF alignment unsupported: ${requiredTimeframe} context unavailable.`,
+    };
+  }
+
+  const expected = direction === 'LONG' ? 'BULLISH' : 'BEARISH';
+  const passed = htf.trend === expected;
+  return {
+    key: 'htfAlignment',
+    passed,
+    reason: passed
+      ? `HTF alignment passed: ${requiredTimeframe} trend is ${htf.trend}.`
+      : `HTF alignment failed: ${requiredTimeframe} trend is ${htf.trend ?? 'UNKNOWN'}, expected ${expected}.`,
+  };
+}
+
+function volatilityRegimeQuality(direction, indicators, config) {
+  const filter = config.qualityFilters?.volatilityRegime;
+  if (!filter?.enabled) {
+    return null;
+  }
+
+  const atrPercent = Number.isFinite(indicators.atr) && Number.isFinite(indicators.price) && indicators.price > 0
+    ? (indicators.atr / indicators.price) * 100
+    : null;
+  const minAtr = Number.isFinite(Number(filter.minAtrPercentOfPrice)) ? Number(filter.minAtrPercentOfPrice) : 0.18;
+  const maxAtr = Number.isFinite(Number(filter.maxAtrPercentOfPrice)) ? Number(filter.maxAtrPercentOfPrice) : 4.5;
+  const maxRangeAtr = Number.isFinite(Number(filter.maxLastRangeAtrMultiple)) ? Number(filter.maxLastRangeAtrMultiple) : 1.45;
+  const rangeAtr = Number.isFinite(indicators.lastCandleRange) && Number.isFinite(indicators.atr) && indicators.atr > 0
+    ? indicators.lastCandleRange / indicators.atr
+    : null;
+  const passed = Number.isFinite(atrPercent) && atrPercent >= minAtr && atrPercent <= maxAtr && (!Number.isFinite(rangeAtr) || rangeAtr <= maxRangeAtr);
+
+  return {
+    key: 'volatilityRegime',
+    passed,
+    reason: passed
+      ? `Volatility regime passed: ATR ${atrPercent.toFixed(3)}% of price, last range ${Number.isFinite(rangeAtr) ? rangeAtr.toFixed(2) : '--'}x ATR.`
+      : `Volatility regime failed: ATR ${Number.isFinite(atrPercent) ? atrPercent.toFixed(3) : '--'}% of price, last range ${Number.isFinite(rangeAtr) ? rangeAtr.toFixed(2) : '--'}x ATR.`,
+  };
+}
+
+function chopAvoidanceQuality(direction, indicators, config) {
+  const filter = config.qualityFilters?.chopAvoidance;
+  if (!filter?.enabled) {
+    return null;
+  }
+
+  const candles = indicators.recentCandles ?? [];
+  const minSeparation = Number.isFinite(Number(filter.minEmaSeparationPercent)) ? Number(filter.minEmaSeparationPercent) : 0.2;
+  const minRangeAtr = Number.isFinite(Number(filter.minRecentRangeAtrMultiple)) ? Number(filter.minRecentRangeAtrMultiple) : 3.2;
+  const maxNeutral = Number.isFinite(Number(filter.maxRsiNeutralCandles)) ? Number(filter.maxRsiNeutralCandles) : 5;
+  const separation = pctDistance(indicators.ema20, indicators.ema50);
+  const highs = candles.map((candle) => candle.high).filter(Number.isFinite);
+  const lows = candles.map((candle) => candle.low).filter(Number.isFinite);
+  const recentRange = highs.length && lows.length ? Math.max(...highs) - Math.min(...lows) : null;
+  const rangeAtr = Number.isFinite(recentRange) && Number.isFinite(indicators.atr) && indicators.atr > 0 ? recentRange / indicators.atr : null;
+  const neutralRsiCount = Number.isFinite(indicators.rsi) && indicators.rsi >= 45 && indicators.rsi <= 55 ? maxNeutral + 1 : 0;
+  const passed =
+    Number.isFinite(separation) &&
+    separation >= minSeparation &&
+    Number.isFinite(rangeAtr) &&
+    rangeAtr >= minRangeAtr &&
+    neutralRsiCount <= maxNeutral;
+
+  return {
+    key: 'chopAvoidance',
+    passed,
+    reason: passed
+      ? `Chop avoidance passed: EMA separation ${separation.toFixed(3)}%, 20-candle range ${rangeAtr.toFixed(2)}x ATR.`
+      : `Chop avoidance failed: EMA separation ${Number.isFinite(separation) ? separation.toFixed(3) : '--'}%, 20-candle range ${Number.isFinite(rangeAtr) ? rangeAtr.toFixed(2) : '--'}x ATR.`,
+  };
+}
+
+function impulseQuality(direction, indicators, config) {
+  const filter = config.qualityFilters?.impulseQuality;
+  if (!filter?.enabled) {
+    return null;
+  }
+
+  const lookback = Number.isFinite(Number(filter.lookbackCandles)) ? Number(filter.lookbackCandles) : 10;
+  const minImpulse = Number.isFinite(Number(filter.minImpulseAtrMultiple)) ? Number(filter.minImpulseAtrMultiple) : 1.8;
+  const candles = (indicators.recentCandles ?? []).slice(-lookback - 1, -1);
+  const highs = candles.map((candle) => candle.high).filter(Number.isFinite);
+  const lows = candles.map((candle) => candle.low).filter(Number.isFinite);
+  const impulse =
+    direction === 'LONG'
+      ? highs.length && lows.length ? Math.max(...highs) - Math.min(...lows) : null
+      : highs.length && lows.length ? Math.max(...highs) - Math.min(...lows) : null;
+  const impulseAtr = Number.isFinite(impulse) && Number.isFinite(indicators.atr) && indicators.atr > 0 ? impulse / indicators.atr : null;
+  const directionalClose =
+    candles.length >= 2
+      ? direction === 'LONG'
+        ? candles.at(-1).close > candles[0].close
+        : candles.at(-1).close < candles[0].close
+      : false;
+  const passed = Number.isFinite(impulseAtr) && impulseAtr >= minImpulse && directionalClose;
+
+  return {
+    key: 'impulseQuality',
+    passed,
+    reason: passed
+      ? `Impulse quality passed: prior move ${impulseAtr.toFixed(2)}x ATR.`
+      : `Impulse quality failed: prior move ${Number.isFinite(impulseAtr) ? impulseAtr.toFixed(2) : '--'}x ATR.`,
+  };
+}
+
+function trendPullbackQualityFilters(direction, indicators, config) {
+  const checks = [
+    trendStrengthQuality(direction, indicators, config),
+    htfAlignmentQuality(direction, indicators, config),
+    volatilityRegimeQuality(direction, indicators, config),
+    chopAvoidanceQuality(direction, indicators, config),
+    impulseQuality(direction, indicators, config),
+  ].filter(Boolean);
+
+  return {
+    passed: checks.every((check) => check.passed),
+    checks,
+    failedReasons: checks.filter((check) => !check.passed).map((check) => check.reason),
+  };
+}
+
+function median(values) {
+  const finite = values.filter(Number.isFinite).sort((left, right) => left - right);
+  if (!finite.length) {
+    return null;
+  }
+
+  const middle = Math.floor(finite.length / 2);
+  return finite.length % 2 ? finite[middle] : (finite[middle - 1] + finite[middle]) / 2;
+}
+
+function candleBody(candle) {
+  return candle ? Math.abs(candle.close - candle.open) : null;
+}
+
+function candleRange(candle) {
+  return candle && Number.isFinite(candle.high) && Number.isFinite(candle.low) ? candle.high - candle.low : null;
+}
+
+function breakoutRangeContext(indicators, config) {
+  const lookback = Number.isFinite(Number(config.compressionLookback)) ? Number(config.compressionLookback) : 20;
+  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const lastCandle = indicators.lastCandle ?? candles.at(-1);
+  const prior = candles.slice(-lookback - 1, -1);
+  const highs = prior.map((candle) => candle.high).filter(Number.isFinite);
+  const lows = prior.map((candle) => candle.low).filter(Number.isFinite);
+  const closes = prior.map((candle) => candle.close).filter(Number.isFinite);
+  const rangeHigh = highs.length ? Math.max(...highs) : null;
+  const rangeLow = lows.length ? Math.min(...lows) : null;
+  const recentRange = Number.isFinite(rangeHigh) && Number.isFinite(rangeLow) ? rangeHigh - rangeLow : null;
+  const atr = Number(indicators.atr);
+  const recentRangeAtr = Number.isFinite(recentRange) && atr > 0 ? recentRange / atr : null;
+  const bodyMedian = median(prior.map(candleBody));
+  const bodyMedianAtr = Number.isFinite(bodyMedian) && atr > 0 ? bodyMedian / atr : null;
+  const previousClose = Number(indicators.previousCandle?.close ?? closes.at(-1));
+  const contained =
+    Number.isFinite(previousClose) &&
+    Number.isFinite(rangeHigh) &&
+    Number.isFinite(rangeLow) &&
+    previousClose <= rangeHigh &&
+    previousClose >= rangeLow;
+  const lastRange = candleRange(lastCandle);
+  const lastBody = candleBody(lastCandle);
+  const bodyToRange = Number.isFinite(lastBody) && Number.isFinite(lastRange) && lastRange > 0 ? lastBody / lastRange : null;
+  const upperWick = lastCandle ? lastCandle.high - Math.max(lastCandle.open, lastCandle.close) : null;
+  const lowerWick = lastCandle ? Math.min(lastCandle.open, lastCandle.close) - lastCandle.low : null;
+  const upperWickToRange = Number.isFinite(upperWick) && Number.isFinite(lastRange) && lastRange > 0 ? upperWick / lastRange : null;
+  const lowerWickToRange = Number.isFinite(lowerWick) && Number.isFinite(lastRange) && lastRange > 0 ? lowerWick / lastRange : null;
+
+  return {
+    lookback,
+    priorCount: prior.length,
+    rangeHigh,
+    rangeLow,
+    recentRange,
+    recentRangeAtr,
+    bodyMedianAtr,
+    contained,
+    lastRange,
+    lastBody,
+    lastRangeAtr: Number.isFinite(lastRange) && atr > 0 ? lastRange / atr : null,
+    lastBodyAtr: Number.isFinite(lastBody) && atr > 0 ? lastBody / atr : null,
+    bodyToRange,
+    upperWickToRange,
+    lowerWickToRange,
+    volumeRatio: indicators.averageVolume > 0 ? indicators.currentVolume / indicators.averageVolume : null,
+  };
+}
+
+function buildBreakoutRiskLevels(direction, indicators, context, config) {
+  const entry1 = indicators.price;
+  const atr = Number(indicators.atr);
+  const atrStopMultiplier = Number.isFinite(Number(config.atrStopMultiplier)) ? Number(config.atrStopMultiplier) : 1.25;
+  const stopBuffer = Number.isFinite(Number(config.stopBufferAtrMultiple)) ? Number(config.stopBufferAtrMultiple) : 0.2;
+  const tp1RTarget = Number.isFinite(Number(config.tp1RTarget)) ? Number(config.tp1RTarget) : 1.5;
+  const tp2RTarget = Number.isFinite(Number(config.tp2RTarget)) ? Number(config.tp2RTarget) : 2.5;
+
+  if (!isFinitePositive(entry1) || !isFinitePositive(atr)) {
+    return {
+      entry1,
+      entry2: null,
+      tp1: null,
+      tp2: null,
+      sl: null,
+      risk: null,
+      rrTp1: null,
+      rrTp2: null,
+      rrRatio: null,
+      slAtrMultiple: null,
+      atr,
+    };
+  }
+
+  if (direction === 'LONG') {
+    const structuralStop = Math.min(
+      Number.isFinite(indicators.lastCandle?.low) ? indicators.lastCandle.low - atr * stopBuffer : entry1 - atr * atrStopMultiplier,
+      Number.isFinite(context.rangeHigh) ? context.rangeHigh - atr * stopBuffer : entry1 - atr * atrStopMultiplier,
+    );
+    const atrStop = entry1 - atr * atrStopMultiplier;
+    const sl = Math.min(atrStop, structuralStop);
+    const risk = entry1 - sl;
+    const tp1 = entry1 + risk * tp1RTarget;
+    const tp2 = entry1 + risk * tp2RTarget;
+
+    return {
+      entry1,
+      entry2: context.rangeHigh,
+      tp1,
+      tp2,
+      sl,
+      risk,
+      rewardTp1: tp1 - entry1,
+      rewardTp2: tp2 - entry1,
+      rrTp1: risk > 0 ? (tp1 - entry1) / risk : null,
+      rrTp2: risk > 0 ? (tp2 - entry1) / risk : null,
+      rrRatio: risk > 0 ? (tp1 - entry1) / risk : null,
+      slAtrMultiple: risk / atr,
+      atr,
+    };
+  }
+
+  const structuralStop = Math.max(
+    Number.isFinite(indicators.lastCandle?.high) ? indicators.lastCandle.high + atr * stopBuffer : entry1 + atr * atrStopMultiplier,
+    Number.isFinite(context.rangeLow) ? context.rangeLow + atr * stopBuffer : entry1 + atr * atrStopMultiplier,
+  );
+  const atrStop = entry1 + atr * atrStopMultiplier;
+  const sl = Math.max(atrStop, structuralStop);
+  const risk = sl - entry1;
+  const tp1 = entry1 - risk * tp1RTarget;
+  const tp2 = entry1 - risk * tp2RTarget;
+
+  return {
+    entry1,
+    entry2: context.rangeLow,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: entry1 - tp1,
+    rewardTp2: entry1 - tp2,
+    rrTp1: risk > 0 ? (entry1 - tp1) / risk : null,
+    rrTp2: risk > 0 ? (entry1 - tp2) / risk : null,
+    rrRatio: risk > 0 ? (entry1 - tp1) / risk : null,
+    slAtrMultiple: risk / atr,
+    atr,
+  };
+}
+
+function breakoutOpposingRoom(direction, indicators, context) {
+  const price = indicators.price;
+  const swingHighs = indicators.marketStructure?.swingHighs ?? [];
+  const swingLows = indicators.marketStructure?.swingLows ?? [];
+  const resistanceCandidates = levelCandidates(
+    [indicators.pivotResistance, indicators.simpleResistance, indicators.resistance, ...swingHighs],
+    (level) => level > price && (!Number.isFinite(context.rangeHigh) || pctDistance(level, context.rangeHigh) > 0.05),
+  );
+  const supportCandidates = levelCandidates(
+    [indicators.pivotSupport, indicators.simpleSupport, indicators.support, ...swingLows],
+    (level) => level < price && (!Number.isFinite(context.rangeLow) || pctDistance(level, context.rangeLow) > 0.05),
+  );
+
+  if (direction === 'LONG') {
+    const nextResistance = resistanceCandidates[0] ?? null;
+    return {
+      opposingLevel: nextResistance,
+      opposingDistance: Number.isFinite(nextResistance) ? distanceAbovePercent(price, nextResistance) : Infinity,
+    };
+  }
+
+  const nextSupport = supportCandidates.at(-1) ?? null;
+  return {
+    opposingLevel: nextSupport,
+    opposingDistance: Number.isFinite(nextSupport) ? distanceBelowPercent(price, nextSupport) : Infinity,
+  };
+}
+
+function breakoutHardBlocks(direction, indicators, context, levels, checks, config) {
+  const reasons = [];
+  const waitReasons = [];
+  const {
+    valid,
+    reason,
+    stale,
+    feedStale,
+    dataError,
+  } = indicators;
+  const rrHardMin = 1.2;
+  const maxSlAtrMultiple = Number.isFinite(Number(config.maxSlAtrMultiple)) ? Number(config.maxSlAtrMultiple) : 2.4;
+
+  if (valid === false || reason === 'insufficient_data') {
+    reasons.push('Insufficient candles for EMA200/RSI/MACD/ATR.');
+  }
+
+  if (stale || feedStale || dataError) {
+    reasons.push(dataError ? `Data feed error: ${dataError}` : 'Stale data. Signal execution disabled.');
+  }
+
+  if (!checks.compressionPass) {
+    waitReasons.push(checks.compressionReason);
+  }
+
+  if (!checks.breakoutPass) {
+    waitReasons.push(checks.breakoutReason);
+  }
+
+  if (!checks.expansionPass) {
+    waitReasons.push(checks.expansionReason);
+  }
+
+  if (!checks.bodyPass) {
+    waitReasons.push(checks.bodyReason);
+  }
+
+  if (!checks.wickPass) {
+    reasons.push(checks.wickReason);
+  }
+
+  if (!checks.roomPass) {
+    reasons.push(checks.roomReason);
+  }
+
+  if (Number.isFinite(context.lastRangeAtr) && context.lastRangeAtr > Number(config.maxExhaustionRangeAtrMultiple ?? 2.35)) {
+    reasons.push(`Breakout candle is exhaustion-sized at ${context.lastRangeAtr.toFixed(2)}x ATR.`);
+  }
+
+  if (!Number.isFinite(levels.rrTp1)) {
+    reasons.push('RR to TP1 is unavailable.');
+  } else if (levels.rrTp1 < rrHardMin) {
+    reasons.push(`R:R is only ${levels.rrTp1.toFixed(2)}:1, below hard minimum ${rrHardMin}.`);
+  }
+
+  if (!Number.isFinite(levels.slAtrMultiple)) {
+    reasons.push('Stop loss cannot be derived from breakout range/ATR.');
+  } else if (levels.slAtrMultiple > maxSlAtrMultiple) {
+    waitReasons.push(`SL distance is greater than ATR x ${maxSlAtrMultiple}.`);
+  } else if (levels.slAtrMultiple < 0.35) {
+    waitReasons.push('SL is too close and likely to be hit by noise.');
+  }
+
+  return { reasons: unique(reasons), waitReasons: unique(waitReasons) };
+}
+
+function classifyBreakoutBlockReasons(checks, context, levels) {
+  const reasons = [];
+
+  if (!checks.compressionPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.NO_COMPRESSION);
+  }
+  if (!checks.breakoutPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.NO_BREAKOUT);
+  }
+  if (!checks.volumeExpansionPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.WEAK_VOLUME_EXPANSION);
+  }
+  if (!checks.rangeExpansionPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.WEAK_RANGE_EXPANSION);
+  }
+  if (!checks.bodyPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.BODY_TOO_SMALL);
+  }
+  if (!checks.wickPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.REJECTION_WICK_TOO_LARGE);
+  }
+  if (!checks.roomPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.OPPOSING_LEVEL_TOO_CLOSE);
+  }
+  if (!checks.rrPass) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.RR_TOO_LOW);
+  }
+  if (!Number.isFinite(context.lastRangeAtr) || !Number.isFinite(context.recentRangeAtr)) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.ATR_MISSING);
+  }
+  if (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0) {
+    reasons.push(V2_BREAKOUT_BLOCK_REASONS.LEVELS_INVALID);
+  }
+
+  return unique(reasons.length ? reasons : [V2_BREAKOUT_BLOCK_REASONS.OTHER]);
+}
+
+function buildBreakoutVolumeExpansionCandidate(direction, indicators, options, marketRegime, config) {
+  const context = breakoutRangeContext(indicators, config);
+  const { price, atr, lastCandle } = indicators;
+  const breakoutBufferAtr = Number(config.minBreakoutCloseBeyondAtr ?? 0.08);
+  const maxCompressionRangeAtr = Number(config.maxCompressionRangeAtrMultiple ?? 5.2);
+  const maxBodyMedianAtr = Number(config.maxCompressionBodyMedianAtrMultiple ?? 0.75);
+  const minBodyAtr = Number(config.minBreakoutBodyAtrMultiple ?? 0.45);
+  const minBodyToRange = Number(config.minBreakoutBodyToRange ?? 0.5);
+  const minVolumeRatio = Number(config.minVolumeRatio ?? 1.25);
+  const minRangeExpansionAtr = Number(config.minRangeExpansionAtrMultiple ?? 1.05);
+  const maxRejectionWick = Number(config.maxRejectionWickToRange ?? 0.42);
+  const minRoom = Number(config.minRoomToOpposingLevelPercent ?? 0.8);
+  const closeBeyond =
+    direction === 'LONG'
+      ? Number.isFinite(context.rangeHigh) && price > context.rangeHigh + atr * breakoutBufferAtr
+      : Number.isFinite(context.rangeLow) && price < context.rangeLow - atr * breakoutBufferAtr;
+  const directionalBody =
+    direction === 'LONG'
+      ? lastCandle?.close > lastCandle?.open
+      : lastCandle?.close < lastCandle?.open;
+  const compressionPass =
+    context.priorCount >= Math.min(context.lookback, 12) &&
+    context.contained &&
+    Number.isFinite(context.recentRangeAtr) &&
+    context.recentRangeAtr <= maxCompressionRangeAtr &&
+    (!Number.isFinite(context.bodyMedianAtr) || context.bodyMedianAtr <= maxBodyMedianAtr);
+  const breakoutPass = closeBeyond && directionalBody;
+  const bodyPass =
+    Number.isFinite(context.lastBodyAtr) &&
+    context.lastBodyAtr >= minBodyAtr &&
+    Number.isFinite(context.bodyToRange) &&
+    context.bodyToRange >= minBodyToRange;
+  const volumeExpansionPass = Number.isFinite(context.volumeRatio) && context.volumeRatio >= minVolumeRatio;
+  const rangeExpansionPass = Number.isFinite(context.lastRangeAtr) && context.lastRangeAtr >= minRangeExpansionAtr;
+  const expansionPass = volumeExpansionPass && rangeExpansionPass;
+  const rejectionWick = direction === 'LONG' ? context.upperWickToRange : context.lowerWickToRange;
+  const wickPass = Number.isFinite(rejectionWick) && rejectionWick <= maxRejectionWick;
+  const room = breakoutOpposingRoom(direction, indicators, context);
+  const roomPass = !Number.isFinite(room.opposingDistance) || room.opposingDistance === Infinity || room.opposingDistance >= minRoom;
+  const levels = buildBreakoutRiskLevels(direction, indicators, context, config);
+  const rrTp1Min = Number.isFinite(Number(config.rrTp1Min)) ? Number(config.rrTp1Min) : 1.5;
+  const rrTp2Min = Number.isFinite(Number(config.rrTp2Min)) ? Number(config.rrTp2Min) : 2;
+  const rrPass =
+    Number.isFinite(levels.rrTp1) &&
+    levels.rrTp1 >= rrTp1Min &&
+    Number.isFinite(levels.rrTp2) &&
+    levels.rrTp2 >= rrTp2Min;
+  const checks = {
+    trendPass: true,
+    rsiPass: true,
+    macdPass: true,
+    structurePass: breakoutPass,
+    levelPass: roomPass,
+    volumePass: expansionPass,
+    compressionPass,
+    breakoutPass,
+    volumeExpansionPass,
+    rangeExpansionPass,
+    expansionPass,
+    bodyPass,
+    wickPass,
+    roomPass,
+    rrPass,
+    resistanceDistance: direction === 'LONG' ? room.opposingDistance : null,
+    supportDistance: direction === 'SHORT' ? room.opposingDistance : null,
+    filtersPass: compressionPass && breakoutPass && expansionPass && bodyPass && wickPass && roomPass && rrPass,
+    compressionReason: compressionPass
+      ? `Compression passed: prior range ${context.recentRangeAtr?.toFixed(2) ?? '--'}x ATR.`
+      : `Compression not ready: prior range ${Number.isFinite(context.recentRangeAtr) ? context.recentRangeAtr.toFixed(2) : '--'}x ATR, contained=${context.contained}.`,
+    breakoutReason: breakoutPass
+      ? `Breakout close confirmed beyond ${direction === 'LONG' ? 'range high' : 'range low'}.`
+      : `No executable ${direction} breakout close beyond compression range.`,
+    expansionReason: expansionPass
+      ? `Expansion passed: volume ${context.volumeRatio?.toFixed(2) ?? '--'}x, range ${context.lastRangeAtr?.toFixed(2) ?? '--'}x ATR.`
+      : `Expansion weak: volume ${Number.isFinite(context.volumeRatio) ? context.volumeRatio.toFixed(2) : '--'}x, range ${Number.isFinite(context.lastRangeAtr) ? context.lastRangeAtr.toFixed(2) : '--'}x ATR.`,
+    bodyReason: bodyPass
+      ? `Breakout body passed: ${context.lastBodyAtr?.toFixed(2) ?? '--'}x ATR, ${(context.bodyToRange * 100).toFixed(1)}% of candle.`
+      : `Breakout body weak: ${Number.isFinite(context.lastBodyAtr) ? context.lastBodyAtr.toFixed(2) : '--'}x ATR, ${Number.isFinite(context.bodyToRange) ? (context.bodyToRange * 100).toFixed(1) : '--'}% of candle.`,
+    wickReason: wickPass
+      ? `Rejection wick acceptable: ${(rejectionWick * 100).toFixed(1)}% of candle.`
+      : `Breakout candle has rejection wick ${Number.isFinite(rejectionWick) ? (rejectionWick * 100).toFixed(1) : '--'}% of range.`,
+    roomReason: roomPass
+      ? 'Breakout has room from nearby opposing level.'
+      : `${direction} breakout is too close to opposing level (${room.opposingDistance.toFixed(2)}%).`,
+  };
+  const items = [
+    scoreItem('compression', 'Recent range compression', compressionPass ? 2 : 0, 2, compressionPass, checks.compressionReason),
+    scoreItem('breakoutClose', 'Close breaks compression range', breakoutPass ? 2 : 0, 2, breakoutPass, checks.breakoutReason),
+    scoreItem('expansion', 'Volume and true-range expansion', expansionPass ? 2 : 0, 2, expansionPass, checks.expansionReason),
+    scoreItem('breakoutBody', 'Meaningful breakout body', bodyPass ? 1 : 0, 1, bodyPass, checks.bodyReason),
+    scoreItem('rejectionWick', 'No major rejection wick', wickPass ? 1 : 0, 1, wickPass, checks.wickReason),
+    scoreItem('opposingRoom', 'Room from opposing level', roomPass ? 1 : 0, 1, roomPass, checks.roomReason),
+    scoreItem(
+      'riskReward',
+      'Risk/reward valid',
+      rrPass ? 1 : 0,
+      1,
+      rrPass,
+      `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min ${rrTp1Min}), TP2 ${Number.isFinite(levels.rrTp2) ? levels.rrTp2.toFixed(2) : '--'} (target ${rrTp2Min}).`,
+    ),
+  ];
+  const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
+  const btcAdjustment = buildBtcAdjustment({ symbol: options.symbol, direction, btcContext: options.btcContext });
+  const fundingOiAdjustment = buildFundingOiAdjustment(direction, indicators);
+  const adjustments = [
+    adjustmentItem('btc', 'BTC Confirmation', btcAdjustment.points, btcAdjustment.note),
+    adjustmentItem('fundingOi', 'Funding/OI', fundingOiAdjustment.points, fundingOiAdjustment.note),
+  ];
+  const adjustmentTotal = btcAdjustment.points + fundingOiAdjustment.points;
+  const finalScore = clampScore(technicalTotal + adjustmentTotal);
+  const blocks = breakoutHardBlocks(direction, indicators, context, levels, checks, config);
+  const blockReasonCodes = classifyBreakoutBlockReasons(checks, context, levels);
+  let status = 'NO_TRADE';
+
+  if (!blocks.reasons.length) {
+    if (blocks.waitReasons.length) {
+      status = finalScore >= 5 ? 'WAIT' : 'NO_TRADE';
+    } else if (finalScore >= config.entryScore && checks.filtersPass) {
+      status = direction;
+    } else if (finalScore >= 5) {
+      status = 'WAIT';
+    }
+  }
+
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal,
+    adjustmentTotal,
+    rawTotal: technicalTotal + adjustmentTotal,
+    max: SCORE_MAX,
+    items,
+    adjustments,
+    breakdown: {
+      compression: items[0].points,
+      breakoutClose: items[1].points,
+      expansion: items[2].points,
+      breakoutBody: items[3].points,
+      rejectionWick: items[4].points,
+      opposingRoom: items[5].points,
+      rrRatio: items[6].points,
+      volume: expansionPass ? 2 : 0,
+      trend: 0,
+    },
+    hardBlock: blocks.reasons[0] ?? null,
+    blockedReasons: blocks.reasons,
+    rejectionReasons: unique([...blocks.reasons, ...blocks.waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    blockReasonCodes,
+    waitReasons: blocks.waitReasons,
+    warnings: unique([...fundingOiAdjustment.warnings, btcAdjustment.warning]),
+    entryContext: status === direction ? 'MOMENTUM_BREAKOUT' : finalScore >= 5 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.MOMENTUM_BREAKOUT : finalScore >= 5 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment,
+    fundingOiAdjustment,
+    checks,
+    diagnostics: {
+      strategyType: 'breakoutVolumeExpansion',
+      direction,
+      compressionDetected: compressionPass,
+      breakoutCandidate: breakoutPass,
+      volumeExpansionPass,
+      rangeExpansionPass,
+      bodyQualityPass: bodyPass,
+      rejectionWickFailure: !wickPass,
+      opposingLevelRoomFailure: !roomPass,
+      rrFailure: !rrPass,
+      blockReasonCodes,
+      primaryBlockReason: blockReasonCodes[0] ?? V2_BREAKOUT_BLOCK_REASONS.OTHER,
+      context: {
+        rangeHigh: round(context.rangeHigh),
+        rangeLow: round(context.rangeLow),
+        recentRangeAtr: round(context.recentRangeAtr),
+        bodyMedianAtr: round(context.bodyMedianAtr),
+        lastRangeAtr: round(context.lastRangeAtr),
+        lastBodyAtr: round(context.lastBodyAtr),
+        bodyToRange: round(context.bodyToRange),
+        volumeRatio: round(context.volumeRatio),
+        opposingLevel: round(room.opposingLevel),
+        opposingDistance: round(room.opposingDistance),
+        rrTp1: round(levels.rrTp1),
+        rrTp2: round(levels.rrTp2),
+        slAtrMultiple: round(levels.slAtrMultiple),
+      },
+    },
+    levels,
+  };
+}
+
+function trendPullbackHardBlocks(direction, indicators, levels, regime, btcAdjustment, fundingOiAdjustment, checks, config) {
+  const reasons = [];
+  const waitReasons = [];
+  const {
+    valid,
+    reason,
+    stale,
+    feedStale,
+    dataError,
+    rsi,
+    atr,
+    lastCandleRange,
+    fundingRate,
+  } = indicators;
+  const rrHardMin = 1.2;
+  const maxSlAtrMultiple = Number.isFinite(Number(config.maxSlAtrMultiple)) ? Number(config.maxSlAtrMultiple) : 2.4;
+
+  if (valid === false || reason === 'insufficient_data') {
+    reasons.push('Insufficient candles for EMA200/RSI/MACD/ATR.');
+  }
+
+  if (stale || feedStale || dataError) {
+    reasons.push(dataError ? `Data feed error: ${dataError}` : 'Stale data. Signal execution disabled.');
+  }
+
+  if (regime === 'VOLATILE_SPIKE') {
+    reasons.push('Last candle is too long versus ATR. Avoid FOMO entry.');
+  }
+
+  if (direction === 'LONG' && rsi > 72) {
+    reasons.push('RSI > 72 for LONG.');
+  }
+
+  if (direction === 'SHORT' && rsi < 28) {
+    reasons.push('RSI < 28 for SHORT.');
+  }
+
+  if (!Number.isFinite(levels.rrTp1)) {
+    reasons.push('RR to TP1 is unavailable.');
+  } else if (levels.rrTp1 < rrHardMin) {
+    reasons.push(`R:R is only ${levels.rrTp1.toFixed(2)}:1, below hard minimum ${rrHardMin}.`);
+  }
+
+  if (!Number.isFinite(levels.slAtrMultiple)) {
+    reasons.push('Stop loss cannot be derived from support/resistance/ATR.');
+  } else if (levels.slAtrMultiple > maxSlAtrMultiple) {
+    waitReasons.push(`SL distance is greater than ATR x ${maxSlAtrMultiple}.`);
+  } else if (levels.slAtrMultiple < 0.35) {
+    waitReasons.push('SL is too close and likely to be hit by noise.');
+  }
+
+  if (Number.isFinite(lastCandleRange) && Number.isFinite(atr) && lastCandleRange > atr * 1.8) {
+    reasons.push('Candle range > ATR x 1.8.');
+  }
+
+  if (Math.abs(btcAdjustment.points) === 2) {
+    waitReasons.push('BTC confirmation is strongly against this altcoin setup.');
+  }
+
+  if (
+    (direction === 'LONG' && Number.isFinite(fundingRate) && fundingRate > FUNDING_EXTREME) ||
+    (direction === 'SHORT' && Number.isFinite(fundingRate) && fundingRate < -FUNDING_EXTREME)
+  ) {
+    waitReasons.push('Funding is extremely crowded against this setup.');
+  }
+
+  if (!checks.trendPass) {
+    reasons.push('Trend structure is not aligned for trend-pullback continuation.');
+  }
+
+  if (!checks.pullbackPass) {
+    waitReasons.push('Pullback has not reached a clean EMA/value zone.');
+  }
+
+  if (!checks.continuationPass) {
+    waitReasons.push('Continuation candle has not confirmed trend direction.');
+  }
+
+  if (!checks.levelPass) {
+    waitReasons.push(direction === 'LONG' ? 'LONG lacks room before resistance.' : 'SHORT lacks room before support.');
+  }
+
+  if (!checks.qualityFiltersPass) {
+    waitReasons.push(...(checks.qualityFilterReasons ?? []));
+  }
+
+  return { reasons: unique(reasons), waitReasons: unique(waitReasons) };
+}
+
+function buildTrendPullbackCandidate(direction, indicators, options, marketRegime, config) {
+  const { symbol, btcContext } = options;
+  const { price, ema20, ema50, ema200, rsi, macd, currentVolume, averageVolume } = indicators;
+  const trendPass =
+    direction === 'LONG'
+      ? price > ema50 && ema20 > ema50 && ema50 > ema200
+      : price < ema50 && ema20 < ema50 && ema50 < ema200;
+  const pullback = trendPullbackQuality(direction, indicators, config);
+  const continuationPass = candleDirectionPass(direction, indicators.lastCandle, indicators.previousCandle);
+  const rsiPass = direction === 'LONG' ? rsi >= 46 && rsi <= 68 : rsi >= 32 && rsi <= 54;
+  const macdPass =
+    direction === 'LONG'
+      ? macd?.MACD > macd?.signal || macd?.histogram > 0 || lastMacdImproving(direction, indicators.macdSeriesTail)
+      : macd?.MACD < macd?.signal || macd?.histogram < 0 || lastMacdImproving(direction, indicators.macdSeriesTail);
+  const momentumPass = rsiPass && macdPass;
+  const level = trendPullbackRoom(direction, indicators, config);
+  const minVolumeRatio = Number.isFinite(Number(config.minVolumeRatio)) ? Number(config.minVolumeRatio) : 0.85;
+  const volumeRatio = averageVolume > 0 ? currentVolume / averageVolume : null;
+  const volumePass = Number.isFinite(volumeRatio) && volumeRatio >= minVolumeRatio;
+  const volume = {
+    passed: volumePass,
+    ratio: volumeRatio,
+    reason: Number.isFinite(volumeRatio)
+      ? `Volume ${volumeRatio.toFixed(2)}x average (min ${minVolumeRatio}).`
+      : 'Volume average unavailable.',
+  };
+  const qualityFilters = trendPullbackQualityFilters(direction, indicators, config);
+  const levels = buildRiskLevels(direction, indicators, config);
+  const rrTp1Min = Number.isFinite(Number(config.rrTp1Min)) ? Number(config.rrTp1Min) : 1.5;
+  const rrTp2Min = Number.isFinite(Number(config.rrTp2Min)) ? Number(config.rrTp2Min) : 2;
+  const rrPass =
+    Number.isFinite(levels.rrTp1) &&
+    levels.rrTp1 >= rrTp1Min &&
+    Number.isFinite(levels.rrTp2) &&
+    levels.rrTp2 >= rrTp2Min;
+
+  const items = [
+    scoreItem('ema', 'EMA trend alignment', trendPass ? 2 : 0, 2, trendPass, trendPass ? 'EMA trend aligned.' : 'EMA trend not aligned.'),
+    scoreItem('pullback', 'Controlled pullback to value', pullback.passed ? 1 : 0, 1, pullback.passed, pullback.reason),
+    scoreItem('continuation', 'Continuation candle confirmed', continuationPass ? 1 : 0, 1, continuationPass, continuationPass ? 'Continuation candle closed in trend direction.' : 'No continuation candle yet.'),
+    scoreItem('momentum', 'Momentum confirms continuation', momentumPass ? 1 : 0, 1, momentumPass, momentumPass ? 'RSI/MACD support continuation.' : 'RSI/MACD continuation is not confirmed.'),
+    scoreItem('keyLevel', 'Room from opposing level', level.passed ? 1 : 0, 1, level.passed, level.reason),
+    scoreItem('volume', 'Volume is acceptable', volume.passed ? 1 : 0, 1, volume.passed, volume.reason),
+    ...qualityFilters.checks.map((check) =>
+      scoreItem(check.key, `Quality filter: ${check.key}`, 0, 0, check.passed, check.reason),
+    ),
+    scoreItem(
+      'riskReward',
+      'Risk/reward valid',
+      rrPass ? 1 : 0,
+      1,
+      rrPass,
+      `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min ${rrTp1Min}), TP2 ${Number.isFinite(levels.rrTp2) ? levels.rrTp2.toFixed(2) : '--'} (target ${rrTp2Min}).`,
+    ),
+  ];
+  const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
+  const btcAdjustment = buildBtcAdjustment({ symbol, direction, btcContext });
+  const fundingOiAdjustment = buildFundingOiAdjustment(direction, indicators);
+  const adjustments = [
+    adjustmentItem('btc', 'BTC Confirmation', btcAdjustment.points, btcAdjustment.note),
+    adjustmentItem('fundingOi', 'Funding/OI', fundingOiAdjustment.points, fundingOiAdjustment.note),
+  ];
+  const adjustmentTotal = btcAdjustment.points + fundingOiAdjustment.points;
+  const finalScore = clampScore(technicalTotal + adjustmentTotal);
+  const checks = {
+    trendPass,
+    pullbackPass: pullback.passed,
+    continuationPass,
+    rsiPass,
+    macdPass,
+    structurePass: pullback.passed,
+    levelPass: level.passed,
+    volumePass: volume.passed,
+    qualityFiltersPass: qualityFilters.passed,
+    qualityFilterReasons: qualityFilters.failedReasons,
+    rrPass,
+    resistanceDistance: level.resistanceDistance,
+    supportDistance: level.supportDistance,
+    filtersPass: trendPass && pullback.passed && continuationPass && momentumPass && level.passed && qualityFilters.passed && rrPass,
+  };
+  const blocks = trendPullbackHardBlocks(direction, indicators, levels, marketRegime, btcAdjustment, fundingOiAdjustment, checks, config);
+  let status = 'NO_TRADE';
+
+  if (!blocks.reasons.length) {
+    if (blocks.waitReasons.length) {
+      status = finalScore >= 6 ? 'WAIT' : 'NO_TRADE';
+    } else if (finalScore >= config.entryScore && checks.filtersPass) {
+      status = direction;
+    } else if (finalScore >= 6) {
+      status = 'WAIT';
+    }
+  }
+
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal,
+    adjustmentTotal,
+    rawTotal: technicalTotal + adjustmentTotal,
+    max: SCORE_MAX,
+    items,
+    adjustments,
+    breakdown: {
+      ema: items[0].points,
+      pullback: items[1].points,
+      continuation: items[2].points,
+      momentum: items[3].points,
+      keyLevel: items[4].points,
+      volume: items[5].points,
+      rrRatio: rrPass ? 1 : 0,
+      trend: items[0].points,
+    },
+    hardBlock: blocks.reasons[0] ?? null,
+    blockedReasons: blocks.reasons,
+    rejectionReasons: unique([...blocks.reasons, ...blocks.waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    waitReasons: blocks.waitReasons,
+    warnings: unique([...fundingOiAdjustment.warnings, btcAdjustment.warning]),
+    entryContext: status === direction ? 'SAFE_ENTRY' : finalScore >= 6 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.SAFE_ENTRY : finalScore >= 6 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment,
+    fundingOiAdjustment,
+    checks,
+    levels,
   };
 }
 
@@ -511,13 +1482,9 @@ function hardBlocks(direction, indicators, levels, regime, btcAdjustment, fundin
     reasons.push('RSI < 28 for SHORT.');
   }
 
-  if (direction === 'LONG' && Number.isFinite(checks.resistanceDistance) && checks.resistanceDistance <= 1) {
-    reasons.push('Price within 1% of resistance for LONG.');
-  }
-
-  if (direction === 'SHORT' && Number.isFinite(checks.supportDistance) && checks.supportDistance <= 1) {
-    reasons.push('Price within 1% of support for SHORT.');
-  }
+  // Proximity gate handled by levelQuality().
+  // Hard block removed to avoid double-blocking.
+  // See: resistanceDistance/supportDistance in levelQuality().
 
   if (!Number.isFinite(levels.rrTp1)) {
     reasons.push('RR to TP1 is unavailable.');
@@ -575,6 +1542,9 @@ function classifyCandidateEntryContext({ direction, score, indicators, checks, l
   const volumeBreakout = averageVolume > 0 && currentVolume >= averageVolume * 1.5;
   const extendedCandle = Number.isFinite(lastCandleRange) && Number.isFinite(atr) && lastCandleRange > atr * 1.35;
 
+  // WAIT_RETEST is intentionally non-executable. It means BOS exists on the current
+  // candle window, but retest confirmation requires future candles to revisit the
+  // breakout level and close back in the expected direction.
   if (marketStructure?.bos?.detected && !marketStructure?.retest?.complete) {
     return 'WAIT_RETEST';
   }
@@ -615,12 +1585,14 @@ function buildCandidate(direction, indicators, options, marketRegime, config) {
   const structurePass = directionStructure(direction, marketStructure);
   const level = levelQuality(direction, indicators);
   const volume = volumeQuality(indicators);
-  const levels = buildRiskLevels(direction, indicators);
+  const levels = buildRiskLevels(direction, indicators, config);
+  const rrTp1Min = Number.isFinite(Number(config.rrTp1Min)) ? Number(config.rrTp1Min) : 1.5;
+  const rrTp2Min = Number.isFinite(Number(config.rrTp2Min)) ? Number(config.rrTp2Min) : 2.5;
   const rrPass =
     Number.isFinite(levels.rrTp1) &&
-    levels.rrTp1 >= 1.5 &&
+    levels.rrTp1 >= rrTp1Min &&
     Number.isFinite(levels.rrTp2) &&
-    levels.rrTp2 >= 2.5;
+    levels.rrTp2 >= rrTp2Min;
 
   const items = [
     scoreItem('ema', 'EMA trend alignment', trendPass ? 2 : 0, 2, trendPass, trendPass ? 'EMA trend aligned.' : 'EMA trend not aligned.'),
@@ -642,7 +1614,7 @@ function buildCandidate(direction, indicators, options, marketRegime, config) {
       rrPass ? 1 : 0,
       1,
       rrPass,
-      `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min 1.5), TP2 ${Number.isFinite(levels.rrTp2) ? levels.rrTp2.toFixed(2) : '--'} (target 2.5).`,
+      `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min ${rrTp1Min}), TP2 ${Number.isFinite(levels.rrTp2) ? levels.rrTp2.toFixed(2) : '--'} (target ${rrTp2Min}).`,
     ),
   ];
   const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
@@ -933,13 +1905,24 @@ export function buildSignalSetup(indicators, options = {}) {
   const { symbol } = options;
   const signalMode = normalizeSignalMode(options.signalMode);
   const modeConfig = getSignalModeConfig(signalMode);
+  const experimentSignalConfig = options.experimentConfig?.signalLogic ?? {};
+  const candidateConfig = {
+    ...modeConfig,
+    ...experimentSignalConfig,
+  };
   const marketRegime = detectMarketRegime(indicators);
   const trendBullish = alignTrend({ direction: 'LONG', price, ema20, ema50, ema200 });
   const trendBearish = alignTrend({ direction: 'SHORT', price, ema20, ema50, ema200 });
   const trend = trendBullish ? 'BULLISH' : trendBearish ? 'BEARISH' : 'NEUTRAL';
 
-  const longCandidate = buildCandidate('LONG', indicators, options, marketRegime, modeConfig);
-  const shortCandidate = buildCandidate('SHORT', indicators, options, marketRegime, modeConfig);
+  const candidateBuilder =
+    experimentSignalConfig.strategyType === 'breakoutVolumeExpansion'
+      ? buildBreakoutVolumeExpansionCandidate
+      : experimentSignalConfig.strategyType === 'trendPullbackContinuation'
+      ? buildTrendPullbackCandidate
+      : buildCandidate;
+  const longCandidate = candidateBuilder('LONG', indicators, options, marketRegime, candidateConfig);
+  const shortCandidate = candidateBuilder('SHORT', indicators, options, marketRegime, candidateConfig);
   const selected = pickCandidate(longCandidate, shortCandidate);
   const finalSignal = selected.status;
   const finalScore = selected.total;
@@ -990,6 +1973,13 @@ export function buildSignalSetup(indicators, options = {}) {
       long: longCandidate,
       short: shortCandidate,
     },
+    signalDiagnostics:
+      experimentSignalConfig.strategyType === 'breakoutVolumeExpansion'
+        ? {
+            strategyType: 'breakoutVolumeExpansion',
+            selected: selected.diagnostics ?? null,
+          }
+        : null,
     hardBlock: selected.hardBlock,
     blockedReason,
     rrWarning,

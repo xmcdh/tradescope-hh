@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import { executeBacktestRun, outputName, parseArgs } from './runBacktest.js';
 import { evaluateProfitabilityProof } from '../lib/profitabilityProof.js';
 import { strategyMetadata } from '../config/strategyVersion.js';
+import { getExperimentFamily, getStrategyExperiment } from '../config/strategyExperiments.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -23,6 +24,48 @@ async function writeSummary(payload) {
   await fs.mkdir(outputDir, { recursive: true });
   await fs.writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
   return outputPath;
+}
+
+function compactBacktest(backtest) {
+  if (!backtest) {
+    return backtest;
+  }
+
+  const {
+    retestDiagnostics,
+    signals,
+    trades,
+    ...rest
+  } = backtest;
+  const diagnostics = rest.diagnostics
+    ? {
+        ...rest.diagnostics,
+        hardBlockReasonBreakdown: {},
+      }
+    : rest.diagnostics;
+
+  return {
+    ...rest,
+    diagnostics,
+  };
+}
+
+function compactValidation(validation) {
+  if (!validation) {
+    return validation;
+  }
+
+  const {
+    inSample,
+    outOfSample,
+    ...rest
+  } = validation;
+
+  return {
+    ...rest,
+    inSample: compactBacktest(inSample),
+    outOfSample: compactBacktest(outOfSample),
+  };
 }
 
 async function main() {
@@ -45,6 +88,14 @@ async function main() {
   const cacheDir = args['cache-dir'] ?? args.cacheDir;
   const file = args.file ?? '';
   const proxyBaseUrl = args['proxy-base-url'] ?? args.proxyBaseUrl;
+  const experimentId = args.experiment ?? args.experimentId ?? '';
+  const dumpSignals = args['dump-signals'] ?? args.dumpSignals ?? 0;
+  const experiment = getStrategyExperiment(experimentId);
+
+  if (experimentId && !experiment) {
+    throw new Error(`Unknown --experiment ${experimentId}.`);
+  }
+
   const results = [];
   const failures = [];
 
@@ -64,6 +115,8 @@ async function main() {
           cacheDir,
           file,
           proxyBaseUrl,
+          experimentId,
+          dumpSignals,
           writeFile: true,
         });
 
@@ -73,8 +126,8 @@ async function main() {
           outputPath: payload.outputPath,
           metadata: payload.metadata,
           integrity: payload.integrity,
-          backtest: payload.backtest,
-          validation: payload.validation,
+          backtest: compactBacktest(payload.backtest),
+          validation: compactValidation(payload.validation),
           warnings: payload.warnings ?? [],
         });
         console.log(`[ok] ${pair} ${timeframe} [${payload.metadata.dataSource}] -> ${path.basename(payload.outputPath ?? outputName({ pair, timeframe, from, to }))}`);
@@ -94,7 +147,19 @@ async function main() {
     }
   }
 
-  const strategy = strategyMetadata();
+  const strategy = experiment
+    ? {
+        ...strategyMetadata(),
+        strategyVersion: experiment.strategyVersion,
+        experimentId: experiment.experimentId,
+        experimentLabel: experiment.label,
+        experimentFamily: getExperimentFamily(experiment.experimentId),
+        candidateOnly: true,
+        backtestOnly: true,
+        liveGateEligible: false,
+        paperGateEligible: false,
+      }
+    : strategyMetadata();
   const proof = evaluateProfitabilityProof(results, { strategyVersion: strategy.strategyVersion });
   const summary = {
     generatedAt: new Date().toISOString(),
@@ -107,11 +172,18 @@ async function main() {
       dataSource,
       fallbackDataSource,
       writeCache: writeCache === true || writeCache === 'true',
+      dumpSignals: Number(dumpSignals) || 0,
       pairs,
       timeframes,
       runCount: pairs.length * timeframes.length,
       successCount: results.length,
       failureCount: failures.length,
+      experimentId: experiment?.experimentId ?? null,
+      experimentLabel: experiment?.label ?? null,
+      experimentFamily: strategy.experimentFamily ?? null,
+      candidateOnly: Boolean(experiment),
+      backtestOnly: Boolean(experiment),
+      activeProductionStrategyVersion: experiment ? strategyMetadata().strategyVersion : strategy.strategyVersion,
     },
     proof,
     results,

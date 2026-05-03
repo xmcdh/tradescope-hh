@@ -278,3 +278,79 @@ test('Proxy blocked HTML classification', () => {
   assert.equal(payload.errorType, ERROR_TYPES.NETWORK_BLOCKED);
   assert.equal(payload.signalAllowed, false);
 });
+
+test('v1.4 HTF alignment filter blocks executable entry when HTF context is unavailable', () => {
+  const recentCandles = Array.from({ length: 20 }, (_, index) => ({
+    open: 98 + index * 0.1,
+    high: 100 + index * 0.1,
+    low: 97 + index * 0.1,
+    close: 99 + index * 0.1,
+    volume: 1000,
+  }));
+  const setup = buildSignalSetup(baseIndicators({
+    recentCandles,
+    ema20: 99.5,
+    ema50: 98,
+    ema20Series: Array.from({ length: 20 }, (_, index) => ({ value: 97 + index * 0.1 })),
+    ema50Series: Array.from({ length: 20 }, (_, index) => ({ value: 96 + index * 0.08 })),
+    higherTimeframeTrend: null,
+  }), {
+    symbol: 'ETHUSDT',
+    btcContext: btcBullish,
+    signalMode: 'conservative',
+    experimentConfig: {
+      signalLogic: {
+        strategyType: 'trendPullbackContinuation',
+        entryScore: 7,
+        qualityFilters: {
+          htfAlignment: {
+            enabled: true,
+            mapping: { '15m': '1h' },
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(setup.signal, 'WAIT');
+  assert.ok(setup.rejectionReasons.some((reason) => reason.includes('HTF alignment unsupported')));
+  assert.equal(setup.tradeLevelsVisible, false);
+});
+
+test('v1.4 HTF alignment filter allows aligned higher timeframe trend without changing production mode', () => {
+  const recentCandles = Array.from({ length: 20 }, (_, index) => ({
+    open: 98 + index * 0.1,
+    high: 100 + index * 0.1,
+    low: 97 + index * 0.1,
+    close: 99 + index * 0.1,
+    volume: 1000,
+  }));
+  const setup = buildSignalSetup(baseIndicators({
+    recentCandles,
+    ema20: 99.5,
+    ema50: 98,
+    ema20Series: Array.from({ length: 20 }, (_, index) => ({ value: 97 + index * 0.1 })),
+    ema50Series: Array.from({ length: 20 }, (_, index) => ({ value: 96 + index * 0.08 })),
+    higherTimeframeTrend: { timeframe: '1h', trend: 'BULLISH' },
+  }), {
+    symbol: 'ETHUSDT',
+    btcContext: btcBullish,
+    signalMode: 'conservative',
+    experimentConfig: {
+      signalLogic: {
+        strategyType: 'trendPullbackContinuation',
+        entryScore: 7,
+        qualityFilters: {
+          htfAlignment: {
+            enabled: true,
+            mapping: { '15m': '1h' },
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(setup.signal, 'LONG');
+  assert.equal(setup.signalValidity, 'VALID');
+  assert.equal(setup.tradeLevelsVisible, true);
+});

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { runBacktest, validateCandleIntegrity } from '../lib/backtester.js';
 import { validateBacktest } from '../lib/backtestValidator.js';
 import { strategyMetadata } from '../config/strategyVersion.js';
+import { getExperimentFamily, getStrategyExperiment } from '../config/strategyExperiments.js';
 import { fetchBacktestOhlcv, normalizePair } from '../lib/backtestDataSource.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -56,7 +57,7 @@ async function hashFiles(filePaths) {
   return hash.digest('hex').slice(0, 12);
 }
 
-async function buildVersionMetadata() {
+async function buildVersionMetadata(experiment = null) {
   const strategyFiles = [
     path.join(PROJECT_ROOT, 'src/lib/backtester.js'),
     path.join(PROJECT_ROOT, 'src/lib/backtestValidator.js'),
@@ -64,10 +65,27 @@ async function buildVersionMetadata() {
     path.join(PROJECT_ROOT, 'src/lib/signalLogic.js'),
   ];
 
-  return {
+  const base = {
     ...strategyMetadata(),
     strategyFingerprint: await hashFiles(strategyFiles),
     signalLogicVersion: await hashFiles([path.join(PROJECT_ROOT, 'src/lib/signalLogic.js')]),
+  };
+
+  if (!experiment) {
+    return base;
+  }
+
+  return {
+    ...base,
+    strategyVersion: experiment.strategyVersion,
+    experimentId: experiment.experimentId,
+    experimentLabel: experiment.label,
+    experimentFamily: getExperimentFamily(experiment.experimentId),
+    candidateOnly: true,
+    backtestOnly: true,
+    liveGateEligible: false,
+    paperGateEligible: false,
+    activeProductionStrategyVersion: base.strategyVersion,
   };
 }
 
@@ -78,6 +96,67 @@ async function writeJsonOutput(payload, filename) {
   await fs.mkdir(outputDir, { recursive: true });
   await fs.writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`);
   return outputPath;
+}
+
+async function writeDebugSignalDump({ pair, timeframe, signals, retestDiagnostics = [], limit = 10 }) {
+  const outputDir = path.join(PROJECT_ROOT, 'backtest-results');
+  const safePair = pair.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+  const outputPath = path.join(outputDir, `debug-signals-${safePair}-${timeframe}.json`);
+  const retestByTimestamp = new Map(
+    (retestDiagnostics ?? []).map((item) => [item.createdAt, item]),
+  );
+  const payload = (signals ?? [])
+    .filter((signal) => signal.signal !== 'NO_TRADE')
+    .slice(0, Math.max(0, Number(limit) || 0));
+  const enriched = payload.map((signal) => {
+    const pending = retestByTimestamp.get(signal.timestamp);
+    if (!pending) {
+      return signal;
+    }
+
+    return {
+      ...signal,
+      retestStatus: pending.status,
+      confirmationRequirement: pending.confirmationRequirement,
+      confirmationOccurred: pending.confirmationOccurred,
+      confirmationTimestamp: pending.confirmationTimestamp,
+      candlesUntilConfirmation: pending.candlesUntilConfirmation,
+      candlesUntilResolution: pending.candlesUntilResolution,
+      confirmationSignal: pending.confirmationSignal,
+      confirmationSignalValidity: pending.confirmationSignalValidity,
+      becameActionableTrade: pending.becameActionableTrade,
+      tradeActionabilityReason: pending.tradeActionabilityReason,
+      invalidationReason: pending.invalidationReason,
+    };
+  });
+
+  await fs.mkdir(outputDir, { recursive: true });
+  await fs.writeFile(outputPath, `${JSON.stringify(enriched, null, 2)}\n`);
+  return outputPath;
+}
+
+function compactStoredSignalsForV2(signals = [], limit = 250) {
+  return (signals ?? [])
+    .filter((signal) => signal.signalDiagnostics?.strategyType === 'breakoutVolumeExpansion' && signal.signal !== 'NO_TRADE')
+    .slice(0, Math.max(0, Number(limit) || 0))
+    .map((signal) => ({
+      timestamp: signal.timestamp,
+      pair: signal.pair,
+      timeframe: signal.timeframe,
+      signal: signal.signal,
+      signalValidity: signal.signalValidity,
+      direction: signal.direction,
+      score: signal.score,
+      blockedReason: signal.blockedReason,
+      rejectionReasons: signal.rejectionReasons,
+      actionableEligible: signal.actionableEligible,
+      actionabilityReason: signal.actionabilityReason,
+      entry: signal.entry,
+      sl: signal.sl,
+      tp: signal.tp,
+      rrRatio: signal.rrRatio,
+      signalDiagnostics: signal.signalDiagnostics,
+    }));
 }
 
 export async function executeBacktestRun({
@@ -94,10 +173,17 @@ export async function executeBacktestRun({
   file = '',
   proxyBaseUrl = undefined,
   writeFile = true,
+  dumpSignals = 0,
+  experimentId = '',
 }) {
   const normalizedPair = normalizePair(pair);
   const fromMs = requiredDate(from, 'from');
   const toMs = requiredDate(to, 'to');
+  const experiment = getStrategyExperiment(experimentId);
+
+  if (experimentId && !experiment) {
+    throw new Error(`Unknown --experiment ${experimentId}.`);
+  }
 
   if (toMs <= fromMs) {
     throw new Error('--to must be after --from.');
@@ -144,10 +230,16 @@ export async function executeBacktestRun({
     throw new Error(`Backtest candle integrity failed: ${integrity.issues.join(' | ')}`);
   }
 
-  const strategyMeta = await buildVersionMetadata();
+  const strategyMeta = await buildVersionMetadata(experiment);
   const pairKey = normalizedPair.replace('/', '');
-  const backtest = runBacktest(fetched.candles, pairKey, timeframe, { signalMode });
-  const validation = validateBacktest(fetched.candles, pairKey, timeframe, { signalMode });
+  const backtestOptions = {
+    signalMode,
+    experimentConfig: experiment,
+    retestConfig: experiment?.retestConfig,
+    strategyMetadata: strategyMeta,
+  };
+  const backtest = runBacktest(fetched.candles, pairKey, timeframe, backtestOptions);
+  const validation = validateBacktest(fetched.candles, pairKey, timeframe, backtestOptions);
   const payload = {
     generatedAt: new Date().toISOString(),
     metadata: {
@@ -163,6 +255,15 @@ export async function executeBacktestRun({
       requestedDataSource: dataSource,
       dataSourceAttempts: attempts,
       cachePath: fetched.cachePath ?? null,
+      experimentId: experiment?.experimentId ?? null,
+      experimentLabel: experiment?.label ?? null,
+      experimentFamily: strategyMeta.experimentFamily ?? null,
+      regimeFilter: experiment?.regimeFilter ?? null,
+      exitGeometry: experiment?.exitGeometry ?? null,
+      candidateOnly: Boolean(experiment),
+      backtestOnly: Boolean(experiment),
+      liveGateEligible: false,
+      paperGateEligible: false,
       ...strategyMeta,
     },
     integrity,
@@ -170,12 +271,42 @@ export async function executeBacktestRun({
     validation,
   };
 
+  if (Number(dumpSignals) > 0) {
+    payload.debugSignalDumpPath = await writeDebugSignalDump({
+      pair: normalizedPair,
+      timeframe,
+      signals: backtest.signals,
+      retestDiagnostics: backtest.retestDiagnostics,
+      limit: Number(dumpSignals),
+    });
+  }
+
   if (integrity.issues.length) {
     payload.warnings = integrity.issues;
   }
 
   if (writeFile) {
-    payload.outputPath = await writeJsonOutput(payload, outputName({ pair: normalizedPair, timeframe, from, to }));
+    const storedPayload =
+      experiment?.signalLogic?.strategyType === 'breakoutVolumeExpansion'
+        ? {
+            ...payload,
+            backtest: {
+              ...payload.backtest,
+              signals: compactStoredSignalsForV2(payload.backtest.signals, Math.max(Number(dumpSignals) || 0, 250)),
+            },
+          }
+        : payload;
+
+    payload.outputPath = await writeJsonOutput(
+      storedPayload,
+      outputName({
+        pair: normalizedPair,
+        timeframe,
+        from,
+        to,
+        prefix: experiment ? `${experiment.experimentId}-` : '',
+      }),
+    );
   }
 
   return payload;
@@ -199,8 +330,11 @@ async function main() {
       file: args.file ?? '',
       proxyBaseUrl: args['proxy-base-url'] ?? args.proxyBaseUrl,
       writeFile: true,
+      dumpSignals: args['dump-signals'] ?? args.dumpSignals ?? 0,
+      experimentId: args.experiment ?? args.experimentId ?? '',
     });
 
+    const debugSignals = args['debug-signals'] === true || args.debugSignals === true || args['debug-signals'] === 'true' || args.debugSignals === 'true';
     console.log(
       JSON.stringify(
         {
@@ -212,6 +346,8 @@ async function main() {
           actionableWinRate: payload.backtest.actionableWinRate,
           actionableExpectancy: payload.backtest.actionableExpectancy,
           oosFlags: payload.validation.flags,
+          diagnostics: debugSignals ? payload.backtest.diagnostics : undefined,
+          debugSignalDumpPath: payload.debugSignalDumpPath ?? null,
         },
         null,
         2,

@@ -201,11 +201,11 @@ function macdState(macd) {
     return 'unavailable';
   }
 
-  if (macd.macd > macd.signal && macd.histogram > 0) {
+  if (macd.MACD > macd.signal && macd.histogram > 0) {
     return 'bullish';
   }
 
-  if (macd.macd < macd.signal && macd.histogram < 0) {
+  if (macd.MACD < macd.signal && macd.histogram < 0) {
     return 'bearish';
   }
 

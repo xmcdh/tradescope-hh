@@ -78,6 +78,31 @@ test('setupRegistry freezes the official paper universe when no backtest summary
   assert.equal(registry.bySymbolKey['SOLUSDT:15m'].setupStatus, SETUP_STATUS.REJECTED_OOS_FAILURE);
 });
 
+test('setupRegistry ignores experimental proof summaries for official paper gate', () => {
+  const registry = buildSetupRegistry({
+    generatedAt: '2026-04-30T00:00:00.000Z',
+    metadata: {
+      ...activeStrategy,
+      strategyVersion: 'v1.6-impulse-filter-soft',
+      experimentId: 'v1.6-impulse-filter-soft',
+      candidateOnly: true,
+    },
+    proof: {
+      ...activeStrategy,
+      strategyVersion: 'v1.6-impulse-filter-soft',
+      status: 'PROVEN_READY_FOR_PAPER',
+      setups: [
+        makeProofSetup({ pair: 'BTC/USDT', timeframe: '1h', status: 'PROVEN_READY_FOR_PAPER' }),
+      ],
+    },
+    results: [],
+  });
+
+  assert.equal(registry.proofStatus, 'STALE_STRATEGY_VERSION');
+  assert.equal(registry.bySymbolKey['BTCUSDT:1h'].setupStatus, SETUP_STATUS.COLLECT_MORE_DATA);
+  assert.equal(registry.counts.approved, 0);
+});
+
 test('rejected OOS setup cannot enter approved paper trading', () => {
   const approval = classifySignalForPaper({
     setupStatus: SETUP_STATUS.REJECTED_OOS_FAILURE,

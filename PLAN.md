@@ -96,6 +96,107 @@ The v1.0 paper phase is archived/superseded. Old records remain historical, but 
 
 Backtest data can be sourced from `ccxt-binance`, `vercel-market-data-proxy`, `local-cache`, or `local-file`. Historical OHLCV cache files live under `data/ohlcv-cache/` and are not part of the official proof unless candle integrity passes.
 
+### v1.1 Retest Audit / Longer History Commands
+
+Current BTC/USDT 1h retest diagnostics show confirmed retests that still fail the executable LONG/SHORT gate. Audit them before changing strategy thresholds:
+
+```bash
+npm run backtest:retest-audit -- --pair BTC/USDT --timeframe 1h
+```
+
+Longer-history experiments are allowed only to measure sample size, not to approve automatically:
+
+```bash
+npm run backtest:batch -- --from 2023-07-01 --to 2024-07-01 --data-source vercel-market-data-proxy --fallback-data-source local-cache --write-cache true
+npm run backtest:batch -- --from 2023-01-01 --to 2024-07-01 --data-source vercel-market-data-proxy --fallback-data-source local-cache --write-cache true
+```
+
+Approval remains strict: no setup with fewer than 50 closed actionable trades can become `APPROVED_FOR_PAPER`, and OOS/walk-forward pass cannot override insufficient sample. Official v1.1 Paper Day 1 remains `PENDING_SETUP_APPROVAL` until at least one setup passes the full proof gate.
+
+### Research Cost Sensitivity Requirement
+
+All future strategy experiments must report cost-adjusted expectancy, not just raw expectancy.
+
+Minimum research output:
+
+```text
+- raw expectancy
+- adjusted expectancy at -0.02R
+- adjusted expectancy at -0.05R
+- adjusted expectancy at -0.10R
+- promotion decision after costs
+```
+
+If a candidate fails after small execution costs, it is not promotable even if the raw backtest looks close.
+
+### Strategy Research Decision v1.1-v1.6
+
+Current research closeout after v1.1 through v1.6:
+
+```text
+Global verdict: NOT READY
+Approved setups: 0
+Paper Day 1: PENDING_SETUP_APPROVAL
+Live execution: STUBBED
+Active production strategy: v1.1-atr-risk
+Next research path recommendation: REDESIGN_EDGE_HYPOTHESIS
+```
+
+No setup is approved after v1.1-v1.6. v1.6 regime filters improved average trade quality on SOL/USDT 1h, but no v1.6 variant preserved at least 50 closed trades, and walk-forward/profit concentration still failed. The best v1.6 result, `v1.6-impulse-filter-medium`, remains `CANDIDATE_ONLY` with 22 closed trades and is not eligible for paper approval.
+
+Gates remain unchanged. Do not start Paper Day 1, enable live execution, promote an experiment, weaken gates, or make any v1.2-v1.6 experiment active in production without a separate explicit approval artifact.
+
+### v2 Strategy Design Phase
+
+v1.1-v1.6 research is closed with no approved setup. The next phase is v2 strategy design, documented in `docs/V2_STRATEGY_DESIGN.md`, before any implementation.
+
+v2 design candidates:
+- `v2-breakout-volume-expansion`
+- `v2-liquidity-sweep-reclaim`
+- `v2-funding-oi-momentum`
+
+First recommended v2 candidate: `v2-breakout-volume-expansion`, because it has the clearest objective edge definition, lowest dependency complexity, and can be validated with existing OHLCV/ATR/volume data.
+
+Operational status remains unchanged:
+- Paper Day 1 remains `PENDING_SETUP_APPROVAL`.
+- Global verdict remains `NOT READY`.
+- Live execution remains `STUBBED`.
+- Active production strategy remains `v1.1-atr-risk`.
+- No v2 strategy is implemented, approved, or active in production yet.
+
+### v2 Breakout Volume Expansion Backtest Result
+
+`v2-breakout-volume-expansion` has been implemented as a backtest-only experiment and evaluated on BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT, and XRP/USDT across 15m, 1h, and 4h from 2023-01-01 to 2024-07-01.
+
+Report files:
+- `backtest-results/v2-breakout-volume-expansion-report.md`
+- `backtest-results/v2-breakout-volume-expansion-report.json`
+
+Result summary:
+
+```text
+Experiment ID: v2-breakout-volume-expansion
+Strategy version: v2-breakout-volume-expansion
+Final status: NOT_READY
+Promotion candidates: 0
+Setups with >=50 closed trades: none
+Best setup by report ranking: BNB/USDT 1h
+Best setup closed trades: 4
+Best setup raw expectancy: 0.25R
+Best setup expectancy after -0.02R cost: 0.23R
+Best setup walk-forward: FAIL
+```
+
+No v2 setup passed strict gates. The first pass is primarily blocked by insufficient sample, with weak expectancy/cost sensitivity and walk-forward failures across the tested universe. `v2-breakout-volume-expansion` remains `CANDIDATE_ONLY` / backtest-only and is not approved for paper.
+
+Operational status remains unchanged after the v2 first pass:
+- Approved setups remain `0`.
+- Paper Day 1 remains `PENDING_SETUP_APPROVAL`.
+- Global verdict remains `NOT READY`.
+- Live execution remains `STUBBED`.
+- Active production strategy remains `v1.1-atr-risk`.
+- `setupRegistry`, `paperGate`, and `liveGate` are not changed by this experiment.
+
 ### Layer 1 — Trend Filter (EMA)
 
 ```text

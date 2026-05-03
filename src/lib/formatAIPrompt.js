@@ -9,7 +9,7 @@ function macdValue(macd) {
     return 'data unavailable';
   }
 
-  return `${Number(macd.macd).toFixed(6)} / signal ${Number(macd.signal).toFixed(6)}`;
+  return `${Number(macd.MACD).toFixed(6)} / signal ${Number(macd.signal).toFixed(6)}`;
 }
 
 function scoreBreakdown(setup) {

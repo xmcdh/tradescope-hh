@@ -46,6 +46,10 @@ const COMMON_UNCHANGED_GATES = [
 ];
 
 export function getExperimentFamily(experimentId = '') {
+  if (String(experimentId).startsWith('v3-')) {
+    return 'v3-edge-redesign';
+  }
+
   if (String(experimentId).startsWith('v2-') || String(experimentId).startsWith('v2.')) {
     return 'v2-edge-redesign';
   }
@@ -726,6 +730,42 @@ export const v2StrategyRedesignExperiments = [
   },
 ];
 
+export const v3EdgeRedesignExperiments = [
+  {
+    experimentId: 'v3-session-breakout',
+    strategyVersion: 'v3-session-breakout',
+    label: 'Session open range breakout',
+    candidateOnly: true,
+    signalLogic: {
+      strategyType: 'sessionBreakout',
+      sessions: [
+        { name: 'asia', startHour: 0, endHour: 4 },
+        { name: 'london', startHour: 7, endHour: 11 },
+        { name: 'ny', startHour: 13, endHour: 17 },
+      ],
+      orCandleCount: 4,
+      minOrSizeAtr: 0.3,
+      maxOrSizeAtr: 3.0,
+      breakoutBufferRatio: 0.1,
+      minVolumeRatio: 1.3,
+      minBodyRatio: 0.5,
+      stopBufferAtr: 0.2,
+      tp1RTarget: 2.0,
+      tp2RTarget: 3.5,
+      rrMin: 1.8,
+      entryScore: 6,
+    },
+    approvalScope: 'backtest-only',
+    changedParameters: {
+      strategyModel: 'session open range breakout with volume confirmation',
+      entryTrigger: 'close beyond completed session opening range with buffer, elevated volume, and strong candle body',
+      invalidation: 'stop beyond opposite side of opening range with ATR buffer; reject tiny/oversized opening ranges and weak breakouts',
+      approvalScope: 'backtest-only; no paperGate or liveGate eligibility',
+    },
+    unchangedGates: [...COMMON_UNCHANGED_GATES],
+  },
+];
+
 export function getBacktestOnlyStrategyExperiments() {
   return [
     ...v12AtrRetestCalibrationExperiments,
@@ -734,6 +774,7 @@ export function getBacktestOnlyStrategyExperiments() {
     ...v15ExitGeometryExperiments,
     ...v16RegimeFilterExperiments,
     ...v2StrategyRedesignExperiments,
+    ...v3EdgeRedesignExperiments,
   ].map((experiment) => ({
     ...experiment,
     backtestOnly: true,

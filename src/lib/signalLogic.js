@@ -1382,6 +1382,390 @@ function liquiditySweepHardBlocks(indicators, levels, checks, config) {
   return { reasons: unique(reasons), waitReasons: unique(waitReasons) };
 }
 
+function timestampMs(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return null;
+  }
+
+  return numeric > 1e12 ? numeric : numeric * 1000;
+}
+
+function utcDayStartMs(timestamp) {
+  const ms = timestampMs(timestamp);
+  if (!Number.isFinite(ms)) {
+    return null;
+  }
+
+  const date = new Date(ms);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+function getSessionForCandle(candleTimestamp, sessions) {
+  const ms = timestampMs(candleTimestamp);
+  const list = Array.isArray(sessions) ? [...sessions] : [];
+
+  if (!Number.isFinite(ms) || !list.length) {
+    return null;
+  }
+
+  const dayStart = utcDayStartMs(ms);
+  const hour = new Date(ms).getUTCHours();
+  const sorted = list
+    .filter((session) => Number.isFinite(Number(session.startHour)) && Number.isFinite(Number(session.endHour)))
+    .sort((left, right) => Number(left.startHour) - Number(right.startHour));
+
+  for (const session of sorted) {
+    const startHour = Number(session.startHour);
+    const endHour = Number(session.endHour);
+    const next = sorted.find((item) => Number(item.startHour) > startHour);
+    const nextStart = next ? Number(next.startHour) : 24;
+
+    if (hour >= startHour && hour < endHour) {
+      return null;
+    }
+
+    if (hour >= endHour && hour < nextStart) {
+      return {
+        ...session,
+        startHour,
+        endHour,
+        sessionStartMs: dayStart + startHour * 60 * 60 * 1000,
+        sessionEndMs: dayStart + endHour * 60 * 60 * 1000,
+      };
+    }
+  }
+
+  const last = sorted.at(-1);
+  if (!last) {
+    return null;
+  }
+
+  const startHour = Number(last.startHour);
+  const endHour = Number(last.endHour);
+  return {
+    ...last,
+    startHour,
+    endHour,
+    sessionStartMs: dayStart - 24 * 60 * 60 * 1000 + startHour * 60 * 60 * 1000,
+    sessionEndMs: dayStart - 24 * 60 * 60 * 1000 + endHour * 60 * 60 * 1000,
+  };
+}
+
+function buildOpeningRange(candles, session, config) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const orCandleCount = Math.max(1, Math.floor(configNumber(config, 'orCandleCount', 4)));
+  const atr = Number(config?.atr);
+  const minOrSizeAtr = configNumber(config, 'minOrSizeAtr', 0.3);
+  const maxOrSizeAtr = configNumber(config, 'maxOrSizeAtr', 3);
+
+  if (!session || !Number.isFinite(session.sessionStartMs) || !Number.isFinite(session.sessionEndMs)) {
+    return { orHigh: null, orLow: null, orSize: null, orCandles: [], valid: false, reason: 'No completed session opening range.' };
+  }
+
+  const orCandles = candleList
+    .filter((candle) => {
+      const ms = timestampMs(candle?.time);
+      return Number.isFinite(ms) && ms >= session.sessionStartMs && ms < session.sessionEndMs;
+    })
+    .slice(0, orCandleCount);
+  const highs = orCandles.map((candle) => candle.high).filter(Number.isFinite);
+  const lows = orCandles.map((candle) => candle.low).filter(Number.isFinite);
+  const orHigh = highs.length ? Math.max(...highs) : null;
+  const orLow = lows.length ? Math.min(...lows) : null;
+  const orSize = Number.isFinite(orHigh) && Number.isFinite(orLow) ? orHigh - orLow : null;
+  const minSize = Number.isFinite(atr) ? minOrSizeAtr * atr : null;
+  const maxSize = Number.isFinite(atr) ? maxOrSizeAtr * atr : null;
+
+  if (orCandles.length < orCandleCount) {
+    return { orHigh, orLow, orSize, orCandles, valid: false, reason: `Opening range incomplete (${orCandles.length}/${orCandleCount}).` };
+  }
+
+  if (!Number.isFinite(orSize) || orSize <= 0 || !Number.isFinite(atr) || atr <= 0) {
+    return { orHigh, orLow, orSize, orCandles, valid: false, reason: 'Opening range or ATR unavailable.' };
+  }
+
+  if (Number.isFinite(minSize) && orSize < minSize) {
+    return { orHigh, orLow, orSize, orCandles, valid: false, reason: `Opening range too small (${(orSize / atr).toFixed(2)}x ATR).` };
+  }
+
+  if (Number.isFinite(maxSize) && orSize > maxSize) {
+    return { orHigh, orLow, orSize, orCandles, valid: false, reason: `Opening range too large (${(orSize / atr).toFixed(2)}x ATR).` };
+  }
+
+  return { orHigh, orLow, orSize, orCandles, valid: true, reason: `Opening range valid (${(orSize / atr).toFixed(2)}x ATR).` };
+}
+
+function sessionBreakoutDetected(direction, currentCandle, or, indicators, config) {
+  const buffer = Number.isFinite(or?.orSize) ? or.orSize * configNumber(config, 'breakoutBufferRatio', 0.1) : null;
+  const range = candleRange(currentCandle);
+  const body = candleBody(currentCandle);
+  const bodyRatio = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
+  const averageVolume = Number(indicators.averageVolume);
+  const currentVolume = Number(currentCandle?.volume ?? indicators.currentVolume);
+  const volumeRatio = averageVolume > 0 && Number.isFinite(currentVolume) ? currentVolume / averageVolume : null;
+  const minBodyRatio = configNumber(config, 'minBodyRatio', 0.5);
+  const minVolumeRatio = configNumber(config, 'effectiveMinVolumeRatio', configNumber(config, 'minVolumeRatio', 1.3));
+  const close = Number(currentCandle?.close);
+  const breakoutLine =
+    direction === 'LONG'
+      ? Number(or?.orHigh) + buffer
+      : Number(or?.orLow) - buffer;
+  const pricePass = direction === 'LONG'
+    ? Number.isFinite(close) && Number.isFinite(breakoutLine) && close > breakoutLine
+    : Number.isFinite(close) && Number.isFinite(breakoutLine) && close < breakoutLine;
+  const bodyPass = Number.isFinite(bodyRatio) && bodyRatio >= minBodyRatio;
+  const volumePass = Number.isFinite(volumeRatio) && volumeRatio >= minVolumeRatio;
+  const detected = pricePass && bodyPass && volumePass;
+  const breakoutStrength = Number.isFinite(volumeRatio) && volumeRatio > 1.5 ? 2 : volumePass ? 1 : 0;
+
+  return {
+    detected,
+    breakoutStrength,
+    pricePass,
+    bodyPass,
+    volumePass,
+    bodyRatio,
+    volumeRatio,
+    buffer,
+    breakoutLine,
+    reason: detected
+      ? `${direction} session breakout confirmed with volume ${volumeRatio.toFixed(2)}x.`
+      : `${direction} session breakout not confirmed: close ${Number.isFinite(close) ? close : '--'}, line ${Number.isFinite(breakoutLine) ? breakoutLine.toFixed(6) : '--'}, volume ${Number.isFinite(volumeRatio) ? volumeRatio.toFixed(2) : '--'}x, body ${Number.isFinite(bodyRatio) ? (bodyRatio * 100).toFixed(1) : '--'}%.`,
+  };
+}
+
+function buildSessionBreakoutRiskLevels(direction, entry, or, atr, config) {
+  const stopBufferAtr = configNumber(config, 'stopBufferAtr', 0.2);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 2);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 3.5);
+  const rrMin = configNumber(config, 'rrMin', 1.8);
+
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !Number.isFinite(or?.orHigh) || !Number.isFinite(or?.orLow)) {
+    return {
+      entry1: entry,
+      entry2: null,
+      tp1: null,
+      tp2: null,
+      sl: null,
+      risk: null,
+      rrTp1: null,
+      rrTp2: null,
+      rrRatio: null,
+      slAtrMultiple: null,
+      atr,
+      rrPass: false,
+    };
+  }
+
+  const sl = direction === 'LONG' ? or.orLow - atr * stopBufferAtr : or.orHigh + atr * stopBufferAtr;
+  const risk = direction === 'LONG' ? entry - sl : sl - entry;
+  const tp1 = direction === 'LONG' ? entry + risk * tp1RTarget : entry - risk * tp1RTarget;
+  const tp2 = direction === 'LONG' ? entry + risk * tp2RTarget : entry - risk * tp2RTarget;
+  const rrTp1 = risk > 0 ? tp1RTarget : null;
+  const rrTp2 = risk > 0 ? tp2RTarget : null;
+
+  return {
+    entry1: entry,
+    entry2: null,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: risk > 0 ? risk * tp1RTarget : null,
+    rewardTp2: risk > 0 ? risk * tp2RTarget : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+    rrPass: Number.isFinite(rrTp1) && rrTp1 >= rrMin,
+  };
+}
+
+function sessionBreakoutHardBlocks(indicators, levels, checks) {
+  const reasons = [];
+  const waitReasons = [];
+  const { valid, reason, stale, feedStale, dataError } = indicators;
+
+  if (valid === false || reason === 'insufficient_data') {
+    reasons.push('Insufficient candles for session breakout evaluation.');
+  }
+
+  if (stale || feedStale || dataError) {
+    reasons.push(dataError ? `Data feed error: ${dataError}` : 'Stale data. Signal execution disabled.');
+  }
+
+  if (!checks.rrPass) {
+    reasons.push(checks.rrReason);
+  }
+
+  if (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0) {
+    reasons.push('Session breakout risk levels are invalid.');
+  }
+
+  if (!checks.sessionPass || !checks.orPass || !checks.breakoutPass) {
+    waitReasons.push(checks.breakoutReason);
+  }
+
+  if (!checks.trendPass) {
+    waitReasons.push('EMA20/EMA50 trend is not aligned for session breakout.');
+  }
+
+  if (!checks.rsiPass) {
+    waitReasons.push(checks.rsiReason);
+  }
+
+  if (!checks.btcPass) {
+    waitReasons.push('BTC bias is strongly opposed to this breakout.');
+  }
+
+  return { reasons: unique(reasons), waitReasons: unique(waitReasons) };
+}
+
+function sessionBreakoutModeConfig(signalMode, config) {
+  if (signalMode === 'conservative') {
+    return { effectiveMinVolumeRatio: 1.5, emaRequired: true };
+  }
+
+  if (signalMode === 'aggressive') {
+    return { effectiveMinVolumeRatio: 1.1, emaRequired: false };
+  }
+
+  return {
+    effectiveMinVolumeRatio: configNumber(config, 'minVolumeRatio', 1.3),
+    emaRequired: true,
+  };
+}
+
+function buildSessionBreakoutCandidate(direction, indicators, options, marketRegime, config) {
+  const { symbol, btcContext, signalMode } = options;
+  const { price, ema20, ema50, rsi, atr } = indicators;
+  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const currentCandle = indicators.lastCandle ?? candles.at(-1);
+  const mode = sessionBreakoutModeConfig(normalizeSignalMode(signalMode), config);
+  const session = getSessionForCandle(currentCandle?.time, config.sessions);
+  const or = buildOpeningRange(candles, session, { ...config, atr });
+  const breakout = sessionBreakoutDetected(direction, currentCandle, or, indicators, { ...config, ...mode });
+  const levels = buildSessionBreakoutRiskLevels(direction, price, or, atr, config);
+  const trendAligned = direction === 'LONG' ? ema20 > ema50 : ema20 < ema50;
+  const trendPass = mode.emaRequired ? trendAligned : true;
+  const rsiPass = direction === 'LONG' ? Number.isFinite(rsi) && rsi < 72 : Number.isFinite(rsi) && rsi > 28;
+  const btcAdjustment = buildBtcAdjustment({ symbol, direction, btcContext });
+  const fundingOiAdjustment = buildFundingOiAdjustment(direction, indicators);
+  const btcPass = btcAdjustment.points > -2;
+  const rrPass = levels.rrPass === true;
+  const breakoutStrengthPoints = breakout.detected ? breakout.breakoutStrength : 0;
+  const bodyPoints = breakout.bodyPass ? 1 : 0;
+  const trendPoints = trendPass ? 1 : 0;
+  const rsiPoints = rsiPass ? 1 : 0;
+  const rrPoints = rrPass ? 1 : 0;
+  const checks = {
+    trendPass,
+    rsiPass,
+    macdPass: true,
+    structurePass: or.valid && breakout.detected,
+    levelPass: or.valid,
+    volumePass: breakout.volumePass,
+    sessionPass: Boolean(session),
+    orPass: or.valid,
+    breakoutPass: breakout.detected,
+    bodyPass: breakout.bodyPass,
+    btcPass,
+    rrPass,
+    resistanceDistance: null,
+    supportDistance: null,
+    filtersPass: Boolean(session) && or.valid && breakout.detected && trendPass && rsiPass && btcPass && rrPass,
+    breakoutReason: breakout.detected ? breakout.reason : or.valid ? breakout.reason : or.reason,
+    rsiReason: Number.isFinite(rsi)
+      ? `RSI ${rsi.toFixed(1)} ${rsiPass ? 'not extreme' : 'is extreme'} for ${direction}.`
+      : 'RSI unavailable.',
+    rrReason: `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min ${configNumber(config, 'rrMin', 1.8)}).`,
+  };
+  const items = [
+    scoreItem('breakoutStrength', 'Session breakout strength', breakoutStrengthPoints, 2, breakout.detected, checks.breakoutReason),
+    scoreItem('bodyRatio', 'Breakout candle body', bodyPoints, 1, breakout.bodyPass, `Body ${Number.isFinite(breakout.bodyRatio) ? (breakout.bodyRatio * 100).toFixed(1) : '--'}% of candle range.`),
+    scoreItem('ema', 'EMA20/EMA50 alignment', trendPoints, 1, trendPass, trendPass ? 'EMA alignment passed.' : 'EMA alignment failed.'),
+    scoreItem('rsi', 'RSI not extreme', rsiPoints, 1, rsiPass, checks.rsiReason),
+    scoreItem('riskReward', 'Risk/reward valid', rrPoints, 1, rrPass, checks.rrReason),
+  ];
+  const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
+  const adjustments = [
+    adjustmentItem('btc', 'BTC Confirmation', btcAdjustment.points, btcAdjustment.note),
+    adjustmentItem('fundingOi', 'Funding/OI', fundingOiAdjustment.points, fundingOiAdjustment.note),
+  ];
+  const adjustmentTotal = btcAdjustment.points + fundingOiAdjustment.points;
+  const finalScore = clampScore(technicalTotal + adjustmentTotal);
+  const blocks = sessionBreakoutHardBlocks(indicators, levels, checks);
+  let status = 'NO_TRADE';
+
+  if (!blocks.reasons.length) {
+    if (finalScore >= config.entryScore && checks.filtersPass) {
+      status = direction;
+    } else if (finalScore >= 4) {
+      status = 'WAIT';
+    }
+  }
+
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal,
+    adjustmentTotal,
+    rawTotal: technicalTotal + adjustmentTotal,
+    max: 6,
+    items,
+    adjustments,
+    breakdown: {
+      breakoutStrength: items[0].points,
+      bodyRatio: items[1].points,
+      ema: items[2].points,
+      rsiMomentum: items[3].points,
+      rrRatio: items[4].points,
+      volume: breakout.volumePass ? breakout.breakoutStrength : 0,
+      trend: items[2].points,
+    },
+    hardBlock: blocks.reasons[0] ?? null,
+    blockedReasons: blocks.reasons,
+    rejectionReasons: unique([...blocks.reasons, ...blocks.waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    blockReasonCodes: [],
+    waitReasons: blocks.waitReasons,
+    warnings: unique([...fundingOiAdjustment.warnings, btcAdjustment.warning]),
+    entryContext: status === direction ? 'MOMENTUM_BREAKOUT' : finalScore >= 4 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.MOMENTUM_BREAKOUT : finalScore >= 4 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment,
+    fundingOiAdjustment,
+    checks,
+    diagnostics: {
+      strategyType: 'sessionBreakout',
+      direction,
+      sessionName: session?.name ?? null,
+      sessionStartHour: session?.startHour ?? null,
+      sessionEndHour: session?.endHour ?? null,
+      openingRangeValid: or.valid,
+      breakoutDetected: breakout.detected,
+      volumeRatio: round(breakout.volumeRatio),
+      bodyRatio: round(breakout.bodyRatio),
+      trendPass,
+      rsiPass,
+      btcPass,
+      rrPass,
+      context: {
+        orHigh: round(or.orHigh),
+        orLow: round(or.orLow),
+        orSize: round(or.orSize),
+        orSizeAtr: Number.isFinite(or.orSize) && Number.isFinite(atr) && atr > 0 ? round(or.orSize / atr) : null,
+        breakoutLine: round(breakout.breakoutLine),
+        rrTp1: round(levels.rrTp1),
+        rrTp2: round(levels.rrTp2),
+        slAtrMultiple: round(levels.slAtrMultiple),
+      },
+    },
+    levels,
+  };
+}
+
 function buildLiquiditySweepReclaimCandidate(direction, indicators, options, marketRegime, config) {
   const { symbol, btcContext } = options;
   const { price, ema20, ema50, ema200, rsi, atr } = indicators;
@@ -2327,6 +2711,8 @@ export function buildSignalSetup(indicators, options = {}) {
   const candidateBuilder =
     experimentSignalConfig.strategyType === 'breakoutVolumeExpansion'
       ? buildBreakoutVolumeExpansionCandidate
+      : experimentSignalConfig.strategyType === 'sessionBreakout'
+      ? buildSessionBreakoutCandidate
       : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
       ? buildLiquiditySweepReclaimCandidate
       : experimentSignalConfig.strategyType === 'trendPullbackContinuation'
@@ -2338,7 +2724,10 @@ export function buildSignalSetup(indicators, options = {}) {
   const finalSignal = selected.status;
   const finalScore = selected.total;
   const blockedReason = unique(selected.blockedReasons ?? []);
-  const signalValidity = classifySignalValidity(finalScore, blockedReason);
+  const signalValidity =
+    experimentSignalConfig.strategyType === 'sessionBreakout' && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
+      ? 'VALID'
+      : classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
   const rrWarning = buildRrWarning(selected.levels);
   const levelWarning = buildLevelWarning(selected.direction, indicators, selected.checks);
@@ -2385,7 +2774,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      ['breakoutVolumeExpansion', 'liquiditySweepReclaim'].includes(experimentSignalConfig.strategyType)
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout'].includes(experimentSignalConfig.strategyType)
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,

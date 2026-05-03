@@ -483,6 +483,35 @@ export const v16RegimeFilterExperiments = [
 
 export const v2StrategyRedesignExperiments = [
   {
+    experimentId: 'v2-liquidity-sweep-reclaim',
+    strategyVersion: 'v2-liquidity-sweep-reclaim',
+    label: 'Liquidity sweep and reclaim reversal',
+    candidateOnly: true,
+    signalLogic: {
+      strategyType: 'liquiditySweepReclaim',
+      entryScore: 7,
+      sweepLookback: 20,
+      reclaimWindowCandles: 3,
+      minSweepWickAtrMultiple: 0.2,
+      minReclaimBodyToRange: 0.45,
+      maxSweepRangeAtrMultiple: 2.5,
+      stopBufferAtrMultiple: 0.15,
+      maxSlAtrMultiple: 2.0,
+      tp1RTarget: 2.0,
+      tp2RTarget: 3.5,
+      rrTp1Min: 1.5,
+      rrTp2Min: 2.5,
+    },
+    approvalScope: 'backtest-only',
+    changedParameters: {
+      strategyModel: 'liquidity sweep below support or above resistance followed by fast reclaim',
+      entryTrigger: 'sweep wick through key level, reclaim close with meaningful body, and tight stop beyond sweep extreme',
+      invalidation: 'stop beyond sweep low/high with ATR buffer; reject massive sweep candles, weak reclaims, wide stops, and poor RR',
+      approvalScope: 'backtest-only; no paperGate or liveGate eligibility',
+    },
+    unchangedGates: [...COMMON_UNCHANGED_GATES],
+  },
+  {
     experimentId: 'v2-breakout-volume-expansion',
     strategyVersion: 'v2-breakout-volume-expansion',
     label: 'Breakout after volume and volatility expansion',

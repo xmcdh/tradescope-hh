@@ -15,6 +15,20 @@ export const V2_BREAKOUT_BLOCK_REASONS = {
   OTHER: 'OTHER',
 };
 
+export const V2_LIQUIDITY_SWEEP_BLOCK_REASONS = {
+  NO_SWEEP: 'NO_SWEEP',
+  NO_RECLAIM: 'NO_RECLAIM',
+  WEAK_SWEEP: 'WEAK_SWEEP',
+  WEAK_RECLAIM: 'WEAK_RECLAIM',
+  RANGE_TOO_LARGE: 'RANGE_TOO_LARGE',
+  RR_TOO_LOW: 'RR_TOO_LOW',
+  ATR_MISSING: 'ATR_MISSING',
+  LEVELS_INVALID: 'LEVELS_INVALID',
+  STOP_TOO_WIDE: 'STOP_TOO_WIDE',
+  RSI_EXTREME: 'RSI_EXTREME',
+  OTHER: 'OTHER',
+};
+
 export const SIGNAL_MODE_CONFIG = {
   conservative: {
     label: 'Conservative',
@@ -681,6 +695,11 @@ function candleRange(candle) {
   return candle && Number.isFinite(candle.high) && Number.isFinite(candle.low) ? candle.high - candle.low : null;
 }
 
+function configNumber(config, key, fallback) {
+  const value = Number(config?.[key]);
+  return Number.isFinite(value) ? value : fallback;
+}
+
 function breakoutRangeContext(indicators, config) {
   const lookback = Number.isFinite(Number(config.compressionLookback)) ? Number(config.compressionLookback) : 20;
   const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
@@ -1121,6 +1140,396 @@ function buildBreakoutVolumeExpansionCandidate(direction, indicators, options, m
         volumeRatio: round(context.volumeRatio),
         opposingLevel: round(room.opposingLevel),
         opposingDistance: round(room.opposingDistance),
+        rrTp1: round(levels.rrTp1),
+        rrTp2: round(levels.rrTp2),
+        slAtrMultiple: round(levels.slAtrMultiple),
+      },
+    },
+    levels,
+  };
+}
+
+function sweepDetected(direction, candles, level, atr, config) {
+  const lookback = Math.max(1, Math.floor(configNumber(config, 'sweepLookback', 20)));
+  const minSweepWick = configNumber(config, 'minSweepWickAtrMultiple', 0.2) * atr;
+  const maxSweepRange = configNumber(config, 'maxSweepRangeAtrMultiple', 2.5) * atr;
+  const recent = Array.isArray(candles) ? candles.slice(-lookback) : [];
+
+  if (!Number.isFinite(level) || !isFinitePositive(atr) || !recent.length) {
+    return { detected: false, sweepCandle: null, sweepLow: null, sweepHigh: null, wickSize: null, rangeAtr: null };
+  }
+
+  for (let index = recent.length - 1; index >= 0; index -= 1) {
+    const candle = recent[index];
+    const range = candleRange(candle);
+    if (!candle || !Number.isFinite(range) || range <= 0 || range > maxSweepRange) {
+      continue;
+    }
+
+    if (direction === 'LONG' && Number.isFinite(candle.low) && candle.low < level) {
+      const wickSize = level - candle.low;
+      if (wickSize >= minSweepWick) {
+        return {
+          detected: true,
+          sweepCandle: candle,
+          sweepLow: candle.low,
+          sweepHigh: null,
+          wickSize,
+          wickAtr: wickSize / atr,
+          rangeAtr: range / atr,
+        };
+      }
+    }
+
+    if (direction === 'SHORT' && Number.isFinite(candle.high) && candle.high > level) {
+      const wickSize = candle.high - level;
+      if (wickSize >= minSweepWick) {
+        return {
+          detected: true,
+          sweepCandle: candle,
+          sweepLow: null,
+          sweepHigh: candle.high,
+          wickSize,
+          wickAtr: wickSize / atr,
+          rangeAtr: range / atr,
+        };
+      }
+    }
+  }
+
+  return { detected: false, sweepCandle: null, sweepLow: null, sweepHigh: null, wickSize: null, rangeAtr: null };
+}
+
+function reclaimConfirmed(direction, candles, level, config) {
+  const windowCandles = Math.max(1, Math.floor(configNumber(config, 'reclaimWindowCandles', 3)));
+  const minBodyToRange = configNumber(config, 'minReclaimBodyToRange', 0.45);
+  const recent = Array.isArray(candles) ? candles.slice(-windowCandles) : [];
+
+  if (!Number.isFinite(level) || !recent.length) {
+    return { confirmed: false, reclaimCandle: null, bodyToRange: null };
+  }
+
+  for (let index = recent.length - 1; index >= 0; index -= 1) {
+    const candle = recent[index];
+    const range = candleRange(candle);
+    const body = candleBody(candle);
+    const bodyToRange = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
+    const closesThroughLevel =
+      direction === 'LONG'
+        ? Number.isFinite(candle?.close) && candle.close > level
+        : Number.isFinite(candle?.close) && candle.close < level;
+
+    if (closesThroughLevel && Number.isFinite(bodyToRange) && bodyToRange >= minBodyToRange) {
+      return { confirmed: true, reclaimCandle: candle, bodyToRange };
+    }
+  }
+
+  return { confirmed: false, reclaimCandle: null, bodyToRange: null };
+}
+
+function buildLiquiditySweepRiskLevels(direction, entry, sweepExtreme, atr, config) {
+  const stopBuffer = configNumber(config, 'stopBufferAtrMultiple', 0.15);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 2);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 3.5);
+
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !Number.isFinite(sweepExtreme)) {
+    return {
+      entry1: entry,
+      entry2: null,
+      tp1: null,
+      tp2: null,
+      sl: null,
+      risk: null,
+      rewardTp1: null,
+      rewardTp2: null,
+      rrTp1: null,
+      rrTp2: null,
+      rrRatio: null,
+      slAtrMultiple: null,
+      atr,
+    };
+  }
+
+  if (direction === 'LONG') {
+    const sl = sweepExtreme - atr * stopBuffer;
+    const risk = entry - sl;
+    const tp1 = entry + risk * tp1RTarget;
+    const tp2 = entry + risk * tp2RTarget;
+
+    return {
+      entry1: entry,
+      entry2: null,
+      tp1,
+      tp2,
+      sl,
+      risk,
+      rewardTp1: tp1 - entry,
+      rewardTp2: tp2 - entry,
+      rrTp1: risk > 0 ? (tp1 - entry) / risk : null,
+      rrTp2: risk > 0 ? (tp2 - entry) / risk : null,
+      rrRatio: risk > 0 ? (tp1 - entry) / risk : null,
+      slAtrMultiple: risk > 0 ? risk / atr : null,
+      atr,
+    };
+  }
+
+  const sl = sweepExtreme + atr * stopBuffer;
+  const risk = sl - entry;
+  const tp1 = entry - risk * tp1RTarget;
+  const tp2 = entry - risk * tp2RTarget;
+
+  return {
+    entry1: entry,
+    entry2: null,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: entry - tp1,
+    rewardTp2: entry - tp2,
+    rrTp1: risk > 0 ? (entry - tp1) / risk : null,
+    rrTp2: risk > 0 ? (entry - tp2) / risk : null,
+    rrRatio: risk > 0 ? (entry - tp1) / risk : null,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+  };
+}
+
+function classifyLiquiditySweepBlockReasons(sweep, reclaim, checks, levels) {
+  const reasons = [];
+
+  if (!sweep.detected) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.NO_SWEEP);
+  }
+  if (sweep.detected && !reclaim.confirmed) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.NO_RECLAIM);
+  }
+  if (sweep.detected && !checks.sweepRangePass) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.RANGE_TOO_LARGE);
+  }
+  if (sweep.detected && !checks.sweepPass) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.WEAK_SWEEP);
+  }
+  if (reclaim.reclaimCandle && !checks.reclaimPass) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.WEAK_RECLAIM);
+  }
+  if (!checks.rsiPass) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.RSI_EXTREME);
+  }
+  if (!checks.rrPass) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.RR_TOO_LOW);
+  }
+  if (!Number.isFinite(levels.atr) || levels.atr <= 0) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.ATR_MISSING);
+  }
+  if (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.LEVELS_INVALID);
+  }
+  if (!checks.slPass) {
+    reasons.push(V2_LIQUIDITY_SWEEP_BLOCK_REASONS.STOP_TOO_WIDE);
+  }
+
+  return unique(reasons.length ? reasons : [V2_LIQUIDITY_SWEEP_BLOCK_REASONS.OTHER]);
+}
+
+function liquiditySweepHardBlocks(indicators, levels, checks, config) {
+  const reasons = [];
+  const waitReasons = [];
+  const { valid, reason, stale, feedStale, dataError } = indicators;
+  const rrHardMin = 1.2;
+  const maxSlAtrMultiple = configNumber(config, 'maxSlAtrMultiple', 2);
+
+  if (valid === false || reason === 'insufficient_data') {
+    reasons.push('Insufficient candles for EMA200/RSI/MACD/ATR.');
+  }
+
+  if (stale || feedStale || dataError) {
+    reasons.push(dataError ? `Data feed error: ${dataError}` : 'Stale data. Signal execution disabled.');
+  }
+
+  if (!checks.sweepPass) {
+    waitReasons.push(checks.sweepReason);
+  }
+
+  if (!checks.reclaimPass) {
+    waitReasons.push(checks.reclaimReason);
+  }
+
+  if (!Number.isFinite(levels.rrTp1)) {
+    reasons.push('RR to TP1 is unavailable.');
+  } else if (levels.rrTp1 < rrHardMin) {
+    reasons.push(`R:R is only ${levels.rrTp1.toFixed(2)}:1, below hard minimum ${rrHardMin}.`);
+  }
+
+  if (!Number.isFinite(levels.slAtrMultiple)) {
+    reasons.push('Stop loss cannot be derived from sweep extreme/ATR.');
+  } else if (levels.slAtrMultiple > maxSlAtrMultiple) {
+    waitReasons.push(`SL distance is greater than ATR x ${maxSlAtrMultiple}.`);
+  }
+
+  if (!checks.rrPass) {
+    reasons.push(checks.rrReason);
+  }
+
+  if (!checks.rsiPass) {
+    waitReasons.push(checks.rsiReason);
+  }
+
+  if (!checks.trendPass) {
+    waitReasons.push('EMA trend is not aligned for sweep reclaim.');
+  }
+
+  return { reasons: unique(reasons), waitReasons: unique(waitReasons) };
+}
+
+function buildLiquiditySweepReclaimCandidate(direction, indicators, options, marketRegime, config) {
+  const { symbol, btcContext } = options;
+  const { price, ema20, ema50, ema200, rsi, atr } = indicators;
+  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const level = direction === 'LONG' ? indicators.support : indicators.resistance;
+  const sweep = sweepDetected(direction, candles, level, atr, config);
+  const reclaim = reclaimConfirmed(direction, candles, level, config);
+  const sweepExtreme = direction === 'LONG' ? sweep.sweepLow : sweep.sweepHigh;
+  const levels = buildLiquiditySweepRiskLevels(direction, price, sweepExtreme, atr, config);
+  const rrTp1Min = configNumber(config, 'rrTp1Min', 1.5);
+  const rrTp2Min = configNumber(config, 'rrTp2Min', 2.5);
+  const maxSlAtrMultiple = configNumber(config, 'maxSlAtrMultiple', 2);
+  const minSweepWickAtr = configNumber(config, 'minSweepWickAtrMultiple', 0.2);
+  const minBodyToRange = configNumber(config, 'minReclaimBodyToRange', 0.45);
+  const trendPass = alignTrend({ direction, price, ema20, ema50, ema200 });
+  const rsiPass = direction === 'LONG' ? Number.isFinite(rsi) && rsi <= 72 : Number.isFinite(rsi) && rsi >= 28;
+  const volume = volumeQuality(indicators);
+  const volumePass = volume.passed;
+  const sweepWickAtr = Number.isFinite(sweep.wickSize) && atr > 0 ? sweep.wickSize / atr : null;
+  const sweepPass = sweep.detected && Number.isFinite(sweepWickAtr) && sweepWickAtr >= minSweepWickAtr;
+  const sweepRangePass = sweep.detected && Number.isFinite(sweep.rangeAtr) && sweep.rangeAtr <= configNumber(config, 'maxSweepRangeAtrMultiple', 2.5);
+  const reclaimPass = reclaim.confirmed && Number.isFinite(reclaim.bodyToRange) && reclaim.bodyToRange >= minBodyToRange;
+  const rrPass =
+    Number.isFinite(levels.rrTp1) &&
+    levels.rrTp1 >= rrTp1Min &&
+    Number.isFinite(levels.rrTp2) &&
+    levels.rrTp2 >= rrTp2Min;
+  const slPass = Number.isFinite(levels.slAtrMultiple) && levels.slAtrMultiple <= maxSlAtrMultiple;
+  const sweepPoints = sweepPass ? (sweepWickAtr >= minSweepWickAtr * 2 ? 2 : 1) : 0;
+  const reclaimPoints = reclaimPass ? (reclaim.bodyToRange >= Math.min(0.9, minBodyToRange + 0.2) ? 2 : 1) : 0;
+  const checks = {
+    trendPass,
+    rsiPass,
+    macdPass: true,
+    structurePass: sweepPass && reclaimPass,
+    levelPass: sweepPass,
+    volumePass,
+    sweepPass,
+    sweepRangePass,
+    reclaimPass,
+    rrPass,
+    slPass,
+    resistanceDistance: direction === 'SHORT' && Number.isFinite(level) ? pctDistance(price, level) : null,
+    supportDistance: direction === 'LONG' && Number.isFinite(level) ? pctDistance(price, level) : null,
+    filtersPass: sweepPass && reclaimPass && trendPass && rsiPass && rrPass && slPass,
+    sweepReason: sweepPass
+      ? `Sweep detected: wick ${sweepWickAtr?.toFixed(2) ?? '--'}x ATR through ${direction === 'LONG' ? 'support' : 'resistance'}.`
+      : `No qualifying ${direction} sweep through ${direction === 'LONG' ? 'support' : 'resistance'}.`,
+    reclaimReason: reclaimPass
+      ? `Reclaim confirmed: body ${(reclaim.bodyToRange * 100).toFixed(1)}% of candle range.`
+      : `No reclaim close with body >= ${(minBodyToRange * 100).toFixed(1)}% of candle range.`,
+    rsiReason: Number.isFinite(rsi)
+      ? `RSI ${rsi.toFixed(1)} ${rsiPass ? 'not extreme' : 'is extreme'} for ${direction}.`
+      : 'RSI unavailable.',
+    rrReason: `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'} (min ${rrTp1Min}), TP2 ${Number.isFinite(levels.rrTp2) ? levels.rrTp2.toFixed(2) : '--'} (target ${rrTp2Min}).`,
+  };
+  const items = [
+    scoreItem('sweepQuality', 'Sweep quality', sweepPoints, 2, sweepPass, checks.sweepReason),
+    scoreItem('reclaimQuality', 'Reclaim candle quality', reclaimPoints, 2, reclaimPass, checks.reclaimReason),
+    scoreItem('ema', 'EMA trend alignment', trendPass ? 1 : 0, 1, trendPass, trendPass ? 'EMA trend aligned.' : 'EMA trend not aligned.'),
+    scoreItem('rsi', 'RSI not extreme', rsiPass ? 1 : 0, 1, rsiPass, checks.rsiReason),
+    scoreItem('riskReward', 'Risk/reward valid', rrPass && slPass ? 1 : 0, 1, rrPass && slPass, checks.rrReason),
+    scoreItem('volume', 'Volume on reclaim candle', volumePass ? 1 : 0, 1, volumePass, volume.reason),
+  ];
+  const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
+  const btcAdjustment = buildBtcAdjustment({ symbol, direction, btcContext });
+  const fundingOiAdjustment = buildFundingOiAdjustment(direction, indicators);
+  const adjustments = [
+    adjustmentItem('btc', 'BTC Confirmation', btcAdjustment.points, btcAdjustment.note),
+    adjustmentItem('fundingOi', 'Funding/OI', fundingOiAdjustment.points, fundingOiAdjustment.note),
+  ];
+  const adjustmentTotal = btcAdjustment.points + fundingOiAdjustment.points;
+  const finalScore = clampScore(technicalTotal + adjustmentTotal);
+  const blocks = liquiditySweepHardBlocks(indicators, levels, checks, config);
+  const blockReasonCodes = classifyLiquiditySweepBlockReasons(sweep, reclaim, checks, levels);
+  let status = 'NO_TRADE';
+
+  if (!blocks.reasons.length) {
+    if (!sweep.detected) {
+      status = 'NO_TRADE';
+    } else if (!reclaim.confirmed) {
+      status = 'WAIT_RETEST';
+    } else if (blocks.waitReasons.length) {
+      status = finalScore >= 5 ? 'WAIT' : 'NO_TRADE';
+    } else if (finalScore >= config.entryScore && checks.filtersPass) {
+      status = direction;
+    } else if (finalScore >= 5) {
+      status = 'WAIT';
+    }
+  }
+
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal,
+    adjustmentTotal,
+    rawTotal: technicalTotal + adjustmentTotal,
+    max: SCORE_MAX,
+    items,
+    adjustments,
+    breakdown: {
+      sweepQuality: items[0].points,
+      reclaimQuality: items[1].points,
+      ema: items[2].points,
+      rsiMomentum: items[3].points,
+      rrRatio: items[4].points,
+      volume: items[5].points,
+      trend: items[2].points,
+    },
+    hardBlock: blocks.reasons[0] ?? null,
+    blockedReasons: blocks.reasons,
+    rejectionReasons: unique([...blocks.reasons, ...blocks.waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    blockReasonCodes,
+    waitReasons: blocks.waitReasons,
+    warnings: unique([...fundingOiAdjustment.warnings, btcAdjustment.warning]),
+    entryContext: status === direction ? 'SAFE_ENTRY' : status === 'WAIT_RETEST' ? 'WAIT_RETEST' : finalScore >= 5 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice:
+      status === direction
+        ? ENTRY_ADVICE.SAFE_ENTRY
+        : status === 'WAIT_RETEST'
+          ? ENTRY_ADVICE.WAIT_RETEST
+          : finalScore >= 5
+            ? ENTRY_ADVICE.WAIT_CONFIRMATION
+            : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment,
+    fundingOiAdjustment,
+    checks,
+    diagnostics: {
+      strategyType: 'liquiditySweepReclaim',
+      direction,
+      sweepDetected: sweep.detected,
+      reclaimConfirmed: reclaim.confirmed,
+      trendPass,
+      rsiPass,
+      volumePass,
+      rrPass,
+      slPass,
+      blockReasonCodes,
+      primaryBlockReason: blockReasonCodes[0] ?? V2_LIQUIDITY_SWEEP_BLOCK_REASONS.OTHER,
+      context: {
+        level: round(level),
+        sweepLow: round(sweep.sweepLow),
+        sweepHigh: round(sweep.sweepHigh),
+        sweepWickAtr: round(sweepWickAtr),
+        sweepRangeAtr: round(sweep.rangeAtr),
+        reclaimBodyToRange: round(reclaim.bodyToRange),
+        volumeRatio: round(volume.ratio),
         rrTp1: round(levels.rrTp1),
         rrTp2: round(levels.rrTp2),
         slAtrMultiple: round(levels.slAtrMultiple),
@@ -1918,6 +2327,8 @@ export function buildSignalSetup(indicators, options = {}) {
   const candidateBuilder =
     experimentSignalConfig.strategyType === 'breakoutVolumeExpansion'
       ? buildBreakoutVolumeExpansionCandidate
+      : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
+      ? buildLiquiditySweepReclaimCandidate
       : experimentSignalConfig.strategyType === 'trendPullbackContinuation'
       ? buildTrendPullbackCandidate
       : buildCandidate;
@@ -1974,9 +2385,9 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      experimentSignalConfig.strategyType === 'breakoutVolumeExpansion'
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim'].includes(experimentSignalConfig.strategyType)
         ? {
-            strategyType: 'breakoutVolumeExpansion',
+            strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,
           }
         : null,

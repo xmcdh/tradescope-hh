@@ -418,3 +418,61 @@ Authoritative paper tracking only counts approved durable trades after 2026-04-3
 - Run `npm run paper:weekly-audit`
 - Review anomalies in `paper-results/weekly-audit.md`
 - Do not promote to live unless all gates pass after 28 days of authoritative approved-only paper tracking
+
+---
+
+## Research Decision Log
+
+### 2026-05-03 - Post MACD Fix Assessment
+
+**Root cause fixed:** macd.macd field was always undefined (should be macd.MACD). All prior v1.x results are invalid because MACD never evaluated.
+
+**Post-fix best result:**
+- Setup: ETH/USDT 1h, v1.1-atr-risk
+- Trades: 48, WinRate: 47.92%
+- Expectancy: 0.1979R, MaxDD: 9.23%
+- OOS degradation: 22.09% (fails 15% gate)
+- Verdict: NOT_READY
+
+**All v1.x and v2 candidates tested:**
+- v1.1 standard (BTC/ETH/SOL/BNB/XRP): NOT_READY
+- v1.1 new pairs (LINK/AVAX/OP/ARB): NOT_READY
+- v1.5 trailing-after-1r: NOT_READY
+- v2-breakout-volume-expansion: NOT_READY
+- v2-liquidity-sweep-reclaim: NOT_READY
+- v2-funding-oi-momentum: DATA_UNAVAILABLE
+
+**Decision: REDESIGN_EDGE_HYPOTHESIS**
+
+Gate 0.3R expectancy is correct and will not be lowered. The problem is not the gate - the problem is no tested hypothesis produces enough edge with payoff 1.5:1 and win rate 45-48%.
+
+Next phase: v3 edge redesign.
+Constraint: must be fundamentally different from trend-following and sweep/reclaim patterns.
+
+### Research Guardrails (Do Not Violate)
+
+These rules apply to all future research:
+
+1. Gates never change without explicit approval artifact
+   - >= 50 closed actionable trades
+   - Win rate > 45%
+   - Expectancy > 0.3R
+   - Expectancy after -0.02R cost > 0.3R
+   - Max DD < 15%
+   - OOS degradation <= 15%
+   - Walk-forward 4/5 windows pass
+   - No profit concentration
+
+2. Never start Paper Day 1 without approved setup
+
+3. Never enable live execution before 28-day paper gate passes
+
+4. All new strategy experiments must be:
+   - candidateOnly: true
+   - backtest-only path
+   - Not touching v1.1 production config
+
+5. Cost sensitivity required for every candidate:
+   Report at -0.02R, -0.05R, -0.10R
+
+6. No automatic approval from longer history alone

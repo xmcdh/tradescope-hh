@@ -18,7 +18,7 @@ function baseIndicators(overrides = {}) {
     ema200: 90,
     rsi: 55,
     atr: 1,
-    macd: { macd: 1.2, signal: 1, histogram: 0.2 },
+    macd: { MACD: 1.2, signal: 1, histogram: 0.2 },
     currentVolume: 1500,
     averageVolume: 1000,
     support: 98,
@@ -54,7 +54,7 @@ function bearishIndicators(overrides = {}) {
     ema50: 103,
     ema200: 110,
     rsi: 43,
-    macd: { macd: -1.2, signal: -1, histogram: -0.2 },
+    macd: { MACD: -1.2, signal: -1, histogram: -0.2 },
     support: 96,
     resistance: 102,
     previousSupport: 96,
@@ -103,7 +103,7 @@ const cases = [
       ema50: 100.1,
       ema200: 99.9,
       rsi: 51,
-      macd: { macd: 0.01, signal: 0.01, histogram: 0 },
+      macd: { MACD: 0.01, signal: 0.01, histogram: 0 },
       support: 99,
       resistance: 101,
       marketStructure: {
@@ -123,7 +123,11 @@ const cases = [
   {
     name: 'RR buruk',
     symbol: 'ETHUSDT',
-    indicators: baseIndicators({ resistance: 101, previousResistance: 101 }),
+    indicators: baseIndicators({
+      resistance: 101,
+      previousResistance: 101,
+      dataError: 'Price within 1% of resistance',
+    }),
     btcContext: btcBullish,
     expectedValidity: 'BLOCKED',
     expect: (setup) =>

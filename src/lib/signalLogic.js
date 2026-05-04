@@ -1,6 +1,7 @@
 const SCORE_MAX = 10;
 const FUNDING_CROWDED = 0.0005;
 const FUNDING_EXTREME = 0.001;
+const SWEEP_STRONG_WICK_ATR = 0.8;
 export const V2_BREAKOUT_BLOCK_REASONS = {
   NO_COMPRESSION: 'NO_COMPRESSION',
   NO_BREAKOUT: 'NO_BREAKOUT',
@@ -1153,25 +1154,37 @@ function sweepDetected(direction, candles, level, atr, config) {
   const lookback = Math.max(1, Math.floor(configNumber(config, 'sweepLookback', 20)));
   const minSweepWick = configNumber(config, 'minSweepWickAtrMultiple', 0.2) * atr;
   const maxSweepRange = configNumber(config, 'maxSweepRangeAtrMultiple', 2.5) * atr;
-  const recent = Array.isArray(candles) ? candles.slice(-lookback) : [];
+  const candleList = Array.isArray(candles) ? candles : [];
+  const recentStart = Math.max(0, candleList.length - lookback);
+  const recent = candleList.slice(recentStart);
 
   if (!Number.isFinite(level) || !isFinitePositive(atr) || !recent.length) {
-    return { detected: false, sweepCandle: null, sweepLow: null, sweepHigh: null, wickSize: null, rangeAtr: null };
+    return { detected: false, sweepCandle: null, sweepCandleIndex: null, sweepLow: null, sweepHigh: null, wickSize: null, rangeAtr: null };
   }
 
   for (let index = recent.length - 1; index >= 0; index -= 1) {
     const candle = recent[index];
+    const candleIndex = recentStart + index;
     const range = candleRange(candle);
     if (!candle || !Number.isFinite(range) || range <= 0 || range > maxSweepRange) {
       continue;
     }
 
-    if (direction === 'LONG' && Number.isFinite(candle.low) && candle.low < level) {
+    if (
+      direction === 'LONG' &&
+      Number.isFinite(candle.low) &&
+      candle.low < level &&
+      Number.isFinite(candle.open) &&
+      candle.open > level &&
+      Number.isFinite(candle.close) &&
+      candle.close > level
+    ) {
       const wickSize = level - candle.low;
       if (wickSize >= minSweepWick) {
         return {
           detected: true,
           sweepCandle: candle,
+          sweepCandleIndex: candleIndex,
           sweepLow: candle.low,
           sweepHigh: null,
           wickSize,
@@ -1181,12 +1194,21 @@ function sweepDetected(direction, candles, level, atr, config) {
       }
     }
 
-    if (direction === 'SHORT' && Number.isFinite(candle.high) && candle.high > level) {
+    if (
+      direction === 'SHORT' &&
+      Number.isFinite(candle.high) &&
+      candle.high > level &&
+      Number.isFinite(candle.open) &&
+      candle.open < level &&
+      Number.isFinite(candle.close) &&
+      candle.close < level
+    ) {
       const wickSize = candle.high - level;
       if (wickSize >= minSweepWick) {
         return {
           detected: true,
           sweepCandle: candle,
+          sweepCandleIndex: candleIndex,
           sweepLow: null,
           sweepHigh: candle.high,
           wickSize,
@@ -1197,13 +1219,16 @@ function sweepDetected(direction, candles, level, atr, config) {
     }
   }
 
-  return { detected: false, sweepCandle: null, sweepLow: null, sweepHigh: null, wickSize: null, rangeAtr: null };
+  return { detected: false, sweepCandle: null, sweepCandleIndex: null, sweepLow: null, sweepHigh: null, wickSize: null, rangeAtr: null };
 }
 
-function reclaimConfirmed(direction, candles, level, config) {
+function reclaimConfirmed(direction, candles, level, config, sweepCandleIndex = null) {
   const windowCandles = Math.max(1, Math.floor(configNumber(config, 'reclaimWindowCandles', 3)));
   const minBodyToRange = configNumber(config, 'minReclaimBodyToRange', 0.45);
-  const recent = Array.isArray(candles) ? candles.slice(-windowCandles) : [];
+  const candleList = Array.isArray(candles) ? candles : [];
+  const start = Number.isInteger(sweepCandleIndex) ? sweepCandleIndex + 1 : Math.max(0, candleList.length - windowCandles);
+  const end = Number.isInteger(sweepCandleIndex) ? Math.min(candleList.length, start + windowCandles) : candleList.length;
+  const recent = candleList.slice(start, end);
 
   if (!Number.isFinite(level) || !recent.length) {
     return { confirmed: false, reclaimCandle: null, bodyToRange: null };
@@ -1211,6 +1236,7 @@ function reclaimConfirmed(direction, candles, level, config) {
 
   for (let index = recent.length - 1; index >= 0; index -= 1) {
     const candle = recent[index];
+    const candleIndex = start + index;
     const range = candleRange(candle);
     const body = candleBody(candle);
     const bodyToRange = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
@@ -1220,11 +1246,11 @@ function reclaimConfirmed(direction, candles, level, config) {
         : Number.isFinite(candle?.close) && candle.close < level;
 
     if (closesThroughLevel && Number.isFinite(bodyToRange) && bodyToRange >= minBodyToRange) {
-      return { confirmed: true, reclaimCandle: candle, bodyToRange };
+      return { confirmed: true, reclaimCandle: candle, reclaimCandleIndex: candleIndex, bodyToRange };
     }
   }
 
-  return { confirmed: false, reclaimCandle: null, bodyToRange: null };
+  return { confirmed: false, reclaimCandle: null, reclaimCandleIndex: null, bodyToRange: null };
 }
 
 function buildLiquiditySweepRiskLevels(direction, entry, sweepExtreme, atr, config) {
@@ -1772,7 +1798,14 @@ function buildLiquiditySweepReclaimCandidate(direction, indicators, options, mar
   const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
   const level = direction === 'LONG' ? indicators.support : indicators.resistance;
   const sweep = sweepDetected(direction, candles, level, atr, config);
-  const reclaim = reclaimConfirmed(direction, candles, level, config);
+  const reclaim = reclaimConfirmed(direction, candles, level, config, sweep.sweepCandleIndex);
+  const reclaimWindowCandles = Math.max(1, Math.floor(configNumber(config, 'reclaimWindowCandles', 3)));
+  const currentCandleIndex = candles.length - 1;
+  const candlesSinceSweep =
+    sweep.detected && Number.isInteger(sweep.sweepCandleIndex) ? currentCandleIndex - sweep.sweepCandleIndex : null;
+  const withinReclaimWindow =
+    Number.isFinite(candlesSinceSweep) && candlesSinceSweep >= 1 && candlesSinceSweep <= reclaimWindowCandles;
+  const reclaimIsCurrentCandle = reclaim.confirmed && reclaim.reclaimCandleIndex === currentCandleIndex;
   const sweepExtreme = direction === 'LONG' ? sweep.sweepLow : sweep.sweepHigh;
   const levels = buildLiquiditySweepRiskLevels(direction, price, sweepExtreme, atr, config);
   const rrTp1Min = configNumber(config, 'rrTp1Min', 1.5);
@@ -1787,14 +1820,19 @@ function buildLiquiditySweepReclaimCandidate(direction, indicators, options, mar
   const sweepWickAtr = Number.isFinite(sweep.wickSize) && atr > 0 ? sweep.wickSize / atr : null;
   const sweepPass = sweep.detected && Number.isFinite(sweepWickAtr) && sweepWickAtr >= minSweepWickAtr;
   const sweepRangePass = sweep.detected && Number.isFinite(sweep.rangeAtr) && sweep.rangeAtr <= configNumber(config, 'maxSweepRangeAtrMultiple', 2.5);
-  const reclaimPass = reclaim.confirmed && Number.isFinite(reclaim.bodyToRange) && reclaim.bodyToRange >= minBodyToRange;
+  const reclaimPass =
+    reclaim.confirmed &&
+    withinReclaimWindow &&
+    reclaimIsCurrentCandle &&
+    Number.isFinite(reclaim.bodyToRange) &&
+    reclaim.bodyToRange >= minBodyToRange;
   const rrPass =
     Number.isFinite(levels.rrTp1) &&
     levels.rrTp1 >= rrTp1Min &&
     Number.isFinite(levels.rrTp2) &&
     levels.rrTp2 >= rrTp2Min;
   const slPass = Number.isFinite(levels.slAtrMultiple) && levels.slAtrMultiple <= maxSlAtrMultiple;
-  const sweepPoints = sweepPass ? (sweepWickAtr >= minSweepWickAtr * 2 ? 2 : 1) : 0;
+  const sweepPoints = sweepPass ? (sweepWickAtr >= SWEEP_STRONG_WICK_ATR ? 2 : 1) : 0;
   const reclaimPoints = reclaimPass ? (reclaim.bodyToRange >= Math.min(0.9, minBodyToRange + 0.2) ? 2 : 1) : 0;
   const checks = {
     trendPass,
@@ -1806,6 +1844,8 @@ function buildLiquiditySweepReclaimCandidate(direction, indicators, options, mar
     sweepPass,
     sweepRangePass,
     reclaimPass,
+    withinReclaimWindow,
+    reclaimIsCurrentCandle,
     rrPass,
     slPass,
     resistanceDistance: direction === 'SHORT' && Number.isFinite(level) ? pctDistance(price, level) : null,
@@ -1816,7 +1856,11 @@ function buildLiquiditySweepReclaimCandidate(direction, indicators, options, mar
       : `No qualifying ${direction} sweep through ${direction === 'LONG' ? 'support' : 'resistance'}.`,
     reclaimReason: reclaimPass
       ? `Reclaim confirmed: body ${(reclaim.bodyToRange * 100).toFixed(1)}% of candle range.`
-      : `No reclaim close with body >= ${(minBodyToRange * 100).toFixed(1)}% of candle range.`,
+      : !withinReclaimWindow && sweep.detected
+        ? `Current candle is outside reclaim window (${candlesSinceSweep ?? '--'} candles after sweep, max ${reclaimWindowCandles}).`
+        : reclaim.confirmed && !reclaimIsCurrentCandle
+          ? 'Reclaim already happened on an earlier candle; skip duplicate entry for this sweep.'
+        : `No reclaim close with body >= ${(minBodyToRange * 100).toFixed(1)}% of candle range after sweep.`,
     rsiReason: Number.isFinite(rsi)
       ? `RSI ${rsi.toFixed(1)} ${rsiPass ? 'not extreme' : 'is extreme'} for ${direction}.`
       : 'RSI unavailable.',
@@ -1846,7 +1890,11 @@ function buildLiquiditySweepReclaimCandidate(direction, indicators, options, mar
   if (!blocks.reasons.length) {
     if (!sweep.detected) {
       status = 'NO_TRADE';
-    } else if (!reclaim.confirmed) {
+    } else if (!withinReclaimWindow && Number.isFinite(candlesSinceSweep) && candlesSinceSweep > reclaimWindowCandles) {
+      status = 'NO_TRADE';
+    } else if (reclaim.confirmed && !reclaimIsCurrentCandle) {
+      status = 'NO_TRADE';
+    } else if (!reclaim.confirmed || !withinReclaimWindow) {
       status = 'WAIT_RETEST';
     } else if (blocks.waitReasons.length) {
       status = finalScore >= 5 ? 'WAIT' : 'NO_TRADE';
@@ -1899,6 +1947,9 @@ function buildLiquiditySweepReclaimCandidate(direction, indicators, options, mar
       direction,
       sweepDetected: sweep.detected,
       reclaimConfirmed: reclaim.confirmed,
+      withinReclaimWindow,
+      reclaimIsCurrentCandle,
+      candlesSinceSweep,
       trendPass,
       rsiPass,
       volumePass,
@@ -1912,6 +1963,7 @@ function buildLiquiditySweepReclaimCandidate(direction, indicators, options, mar
         sweepHigh: round(sweep.sweepHigh),
         sweepWickAtr: round(sweepWickAtr),
         sweepRangeAtr: round(sweep.rangeAtr),
+        candlesSinceSweep: round(candlesSinceSweep),
         reclaimBodyToRange: round(reclaim.bodyToRange),
         volumeRatio: round(volume.ratio),
         rrTp1: round(levels.rrTp1),

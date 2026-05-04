@@ -337,7 +337,7 @@ test('v1.6 regime filter blocks executable trades using entry-time regime featur
         atr: 1,
         support: last.close - 3,
         resistance: last.close + 5,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
       };
     },
@@ -393,7 +393,7 @@ test('VALID ATR signal with entryPrice/slPrice/tp1Price opens and closes a simul
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };
@@ -460,7 +460,7 @@ test('regime features are attached to simulated trades using entry history only'
           atr: 1,
           support: last.close - 3,
           resistance: last.close + 5,
-          macd: { macd: 1, signal: 0, histogram: 1 },
+          macd: { MACD: 1, signal: 0, histogram: 1 },
           marker: last.time,
         };
       },
@@ -556,7 +556,7 @@ test('missing TP/SL prevents actionable trade and is counted in diagnostics', ()
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };
@@ -602,7 +602,7 @@ test('BLOCKED executable signals are counted but not traded', () => {
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };
@@ -666,7 +666,7 @@ test('WAIT_RETEST creates pending setup and opens trade only after confirmation'
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };
@@ -755,7 +755,7 @@ test('WAIT_RETEST expires after configured max wait candles', () => {
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };
@@ -826,7 +826,7 @@ test('MARGINAL WAIT_RETEST can confirm but still never becomes an approved trade
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };
@@ -915,7 +915,7 @@ test('confirmed retest with MARGINAL confirmation candle does not open a trade',
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };
@@ -1005,7 +1005,7 @@ test('confirmed retest with BLOCKED confirmation candle does not open a trade', 
       const last = window.at(-1);
       return {
         price: last.close,
-        macd: { macd: 1, signal: 0, histogram: 1 },
+        macd: { MACD: 1, signal: 0, histogram: 1 },
         marker: last.time,
         atr: 1,
       };

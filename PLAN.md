@@ -461,6 +461,17 @@ Main blocker: institutional session boundaries do not apply cleanly to 24/7 cryp
 
 Decision: close V3-B, proceed to V3-C FVG.
 
+### 2026-05-03 — V3-C Fair Value Gap Closed
+
+Best result: ETH/USDT 1h
+- Trades: 123, WinRate: 32.52%, Exp: -0.02R
+- FVG fill rate: only 26-28%
+- BTC worst: WR 15.66%, Exp -0.53R
+
+Main blocker: in crypto 1h, FVG zones are penetrated rather than respected as reversal zones. Price delivery mechanics differ from forex/equities where FVG works better.
+
+Decision: close V3-C, proceed to V3-D Order Block.
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:

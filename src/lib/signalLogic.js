@@ -2037,6 +2037,274 @@ function buildFairValueGapCandidate(direction, indicators, options, marketRegime
   };
 }
 
+function detectOrderBlock(direction, candles, atr, config) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const currentIndex = candleList.length - 1;
+  const obLookback = Math.max(3, Math.floor(configNumber(config, 'obLookback', 100)));
+  const minObSizeAtr = configNumber(config, 'minObSizeAtr', 0.3);
+  const maxObSizeAtr = configNumber(config, 'maxObSizeAtr', 2.5);
+  const minObBodyRatio = configNumber(config, 'minObBodyRatio', 0.4);
+  const minImpulseMoveAtr = configNumber(config, 'minImpulseMoveAtr', 1.5);
+  const impulseWindowCandles = Math.max(1, Math.floor(configNumber(config, 'impulseWindowCandles', 3)));
+  const maxObAgeCandles = Math.max(1, Math.floor(configNumber(config, 'maxObAgeCandles', 50)));
+  const startIndex = Math.max(0, currentIndex - obLookback);
+
+  if (!Number.isFinite(atr) || atr <= 0 || currentIndex < impulseWindowCandles + 1) {
+    return { detected: false, reason: 'ATR or candle history unavailable for OB detection.' };
+  }
+
+  for (let index = currentIndex - impulseWindowCandles - 1; index >= startIndex; index -= 1) {
+    const orderBlockCandle = candleList[index];
+    const range = candleRange(orderBlockCandle);
+    const body = candleBody(orderBlockCandle);
+    const bodyRatio = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
+    const bearishCandle = Number(orderBlockCandle?.close) < Number(orderBlockCandle?.open);
+    const bullishCandle = Number(orderBlockCandle?.close) > Number(orderBlockCandle?.open);
+    const shapePass = direction === 'LONG' ? bearishCandle : bullishCandle;
+    const obTop = direction === 'LONG' ? Number(orderBlockCandle?.open) : Number(orderBlockCandle?.close);
+    const obBottom = direction === 'LONG' ? Number(orderBlockCandle?.close) : Number(orderBlockCandle?.open);
+    const obSize = obTop - obBottom;
+    const obSizeAtr = obSize / atr;
+    const impulseCandles = candleList.slice(index + 1, index + 1 + impulseWindowCandles);
+    const impulseClose = impulseCandles.at(-1)?.close;
+    const netMove = direction === 'LONG'
+      ? Number(impulseClose) - Number(orderBlockCandle?.close)
+      : Number(orderBlockCandle?.close) - Number(impulseClose);
+    const impulseStrength = netMove / atr;
+    const nextCandle = candleList[index + 1];
+    const engulfing = direction === 'LONG'
+      ? Number(nextCandle?.close) > Number(orderBlockCandle?.open) && Number(nextCandle?.open) <= Number(orderBlockCandle?.close)
+      : Number(nextCandle?.close) < Number(orderBlockCandle?.open) && Number(nextCandle?.open) >= Number(orderBlockCandle?.close);
+    const impulsePass = Number.isFinite(impulseStrength) && impulseStrength >= minImpulseMoveAtr || engulfing;
+    const obAge = currentIndex - index;
+    const qualityPass =
+      shapePass &&
+      Number.isFinite(bodyRatio) && bodyRatio >= minObBodyRatio &&
+      Number.isFinite(obSizeAtr) && obSizeAtr >= minObSizeAtr && obSizeAtr <= maxObSizeAtr &&
+      impulsePass &&
+      obAge <= maxObAgeCandles;
+
+    if (!qualityPass) {
+      continue;
+    }
+
+    const afterImpulse = candleList.slice(index + 1 + impulseWindowCandles, currentIndex);
+    const violated = direction === 'LONG'
+      ? afterImpulse.some((candle) => Number(candle?.close) < obBottom)
+      : afterImpulse.some((candle) => Number(candle?.close) > obTop);
+
+    if (violated) {
+      continue;
+    }
+
+    return {
+      detected: true,
+      obTop,
+      obBottom,
+      obSize,
+      obSizeAtr,
+      obMid: (obTop + obBottom) / 2,
+      obAge,
+      impulseStrength,
+      bodyRatio,
+      formationIndex: index,
+      reason: `${direction} OB detected with ${impulseStrength.toFixed(2)}x ATR impulse, age ${obAge} candles.`,
+    };
+  }
+
+  return { detected: false, reason: 'No valid unviolated OB found in lookback.' };
+}
+
+function obEntryTriggered(direction, currentCandle, ob, indicators, config) {
+  const close = Number(currentCandle?.close);
+  const low = Number(currentCandle?.low);
+  const high = Number(currentCandle?.high);
+  const range = candleRange(currentCandle);
+  const body = candleBody(currentCandle);
+  const bodyRatio = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
+  const averageVolume = Number(indicators?.averageVolume);
+  const currentVolume = Number(currentCandle?.volume ?? indicators?.currentVolume);
+  const volumeRatio = averageVolume > 0 && Number.isFinite(currentVolume) ? currentVolume / averageVolume : null;
+  const minTriggerBodyRatio = configNumber(config, 'minTriggerBodyRatio', 0.4);
+  const minTriggerVolumeRatio = configNumber(config, 'minTriggerVolumeRatio', 0.8);
+
+  if (!ob?.detected || !Number.isFinite(close)) {
+    return { triggered: false, entryPrice: close, bodyRatio, volumeRatio, reason: 'No detected OB available for entry trigger.' };
+  }
+
+  const zoneTouched = direction === 'LONG'
+    ? Number.isFinite(low) && low <= ob.obTop && close >= ob.obBottom
+    : Number.isFinite(high) && high >= ob.obBottom && close <= ob.obTop;
+  const bodyPass = Number.isFinite(bodyRatio) && bodyRatio >= minTriggerBodyRatio;
+  const volumePass = Number.isFinite(volumeRatio) && volumeRatio >= minTriggerVolumeRatio;
+  const triggered = zoneTouched && bodyPass && volumePass;
+
+  return {
+    triggered,
+    entryPrice: close,
+    bodyRatio,
+    volumeRatio,
+    zoneTouched,
+    bodyPass,
+    volumePass,
+    reason: triggered ? `${direction} OB return entry triggered.` : `${direction} OB return entry not triggered.`,
+  };
+}
+
+function buildOBRiskLevels(direction, entry, ob, atr, config) {
+  const stopBufferAtr = configNumber(config, 'stopBufferAtr', 0.15);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 2);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 4);
+  const rrMin = configNumber(config, 'rrMin', 1.8);
+
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !Number.isFinite(ob?.obTop) || !Number.isFinite(ob?.obBottom)) {
+    return { entry1: entry, entry2: null, tp1: null, tp2: null, sl: null, risk: null, rrTp1: null, rrTp2: null, rrRatio: null, atr, rrPass: false };
+  }
+
+  const sl = direction === 'LONG' ? ob.obBottom - atr * stopBufferAtr : ob.obTop + atr * stopBufferAtr;
+  const risk = direction === 'LONG' ? entry - sl : sl - entry;
+  const tp1 = direction === 'LONG' ? entry + risk * tp1RTarget : entry - risk * tp1RTarget;
+  const tp2 = direction === 'LONG' ? entry + risk * tp2RTarget : entry - risk * tp2RTarget;
+  const rrTp1 = risk > 0 ? tp1RTarget : null;
+  const rrTp2 = risk > 0 ? tp2RTarget : null;
+
+  return {
+    entry1: entry,
+    entry2: ob.obMid,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: risk > 0 ? risk * tp1RTarget : null,
+    rewardTp2: risk > 0 ? risk * tp2RTarget : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+    rrPass: Number.isFinite(rrTp1) && rrTp1 >= rrMin,
+  };
+}
+
+function emaSlopeAligned(direction, indicators) {
+  const candles = Array.isArray(indicators?.recentCandles) ? indicators.recentCandles : [];
+  if (candles.length < 10 || !Number.isFinite(indicators?.ema50)) {
+    return false;
+  }
+
+  const older = candles.at(-6)?.close;
+  const current = indicators.ema50;
+  return direction === 'LONG' ? current > older : current < older;
+}
+
+function buildOrderBlockCandidate(direction, indicators, options, marketRegime, config) {
+  const { symbol, btcContext } = options;
+  const { rsi, atr } = indicators;
+  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const currentCandle = indicators.lastCandle ?? candles.at(-1);
+  const ob = detectOrderBlock(direction, candles, atr, config);
+  const entry = obEntryTriggered(direction, currentCandle, ob, indicators, config);
+  const levels = buildOBRiskLevels(direction, entry.entryPrice, ob, atr, config);
+  const emaPass = emaSlopeAligned(direction, indicators);
+  const rsiMin = configNumber(config, 'rsiMin', 35);
+  const rsiMax = configNumber(config, 'rsiMax', 65);
+  const rsiPass = Number.isFinite(rsi) && rsi >= rsiMin && rsi <= rsiMax;
+  const rrPass = levels.rrPass === true;
+  const obQualityPoints = ob.detected && ob.impulseStrength > 3 ? 2 : ob.detected ? 1 : 0;
+  const obFreshPass = ob.detected && ob.obAge <= 20;
+  const rsiCenteredPass = Number.isFinite(rsi) && rsi >= 45 && rsi <= 55;
+  const rrAdequatePass = Number.isFinite(levels.rrTp1) && levels.rrTp1 >= 2.5;
+  const btcAdjustment = buildBtcAdjustment({ symbol, direction, btcContext });
+  const fundingOiAdjustment = buildFundingOiAdjustment(direction, indicators);
+  const items = [
+    scoreItem('obQuality', 'OB impulse quality', obQualityPoints, 2, ob.detected, ob.reason),
+    scoreItem('obFresh', 'OB freshness', obFreshPass ? 1 : 0, 1, obFreshPass, obFreshPass ? 'OB age <= 20 candles.' : 'OB is stale or unavailable.'),
+    scoreItem('emaSlope', 'EMA50 slope alignment', emaPass ? 1 : 0, 1, emaPass, emaPass ? 'EMA50 slope aligned.' : 'EMA50 slope failed.'),
+    scoreItem('rsiCentered', 'RSI centered', rsiCenteredPass ? 1 : 0, 1, rsiCenteredPass, Number.isFinite(rsi) ? `RSI ${rsi.toFixed(1)}.` : 'RSI unavailable.'),
+    scoreItem('rrAdequate', 'Risk/reward adequate', rrAdequatePass ? 1 : 0, 1, rrAdequatePass, `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'}.`),
+  ];
+  const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
+  const finalScore = clampScore(technicalTotal);
+  const blockedReasons = [];
+  const waitReasons = [];
+
+  if (!ob.detected) waitReasons.push(ob.reason);
+  if (!entry.triggered) waitReasons.push(entry.reason);
+  if (!rrPass) blockedReasons.push('OB RR is below minimum or unavailable.');
+  if (!emaPass) blockedReasons.push('OB EMA50 slope filter failed.');
+  if (!rsiPass) blockedReasons.push(`OB RSI must be between ${rsiMin} and ${rsiMax}.`);
+  if (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0) {
+    blockedReasons.push('OB risk levels are invalid.');
+  }
+
+  let status = 'NO_TRADE';
+  if (!blockedReasons.length && ob.detected && entry.triggered) {
+    status = finalScore >= config.entryScore ? direction : finalScore >= 4 ? 'WAIT' : 'NO_TRADE';
+  } else if (!blockedReasons.length && finalScore >= 4) {
+    status = 'WAIT';
+  }
+
+  const checks = { obPass: ob.detected, entryPass: entry.triggered, emaPass, rsiPass, rrPass };
+
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal,
+    adjustmentTotal: 0,
+    rawTotal: technicalTotal,
+    max: 6,
+    items,
+    adjustments: [],
+    breakdown: {
+      obQuality: items[0].points,
+      obFresh: items[1].points,
+      emaSlope: items[2].points,
+      rsiCentered: items[3].points,
+      rrAdequate: items[4].points,
+    },
+    hardBlock: blockedReasons[0] ?? null,
+    blockedReasons,
+    rejectionReasons: unique([...blockedReasons, ...waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    waitReasons,
+    warnings: unique([...fundingOiAdjustment.warnings, btcAdjustment.warning]),
+    entryContext: status === direction ? 'SAFE_ENTRY' : finalScore >= 4 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.SAFE_ENTRY : finalScore >= 4 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment,
+    fundingOiAdjustment,
+    checks,
+    diagnostics: {
+      strategyType: 'orderBlock',
+      direction,
+      obDetected: ob.detected,
+      entryTriggered: entry.triggered,
+      obTop: round(ob.obTop),
+      obBottom: round(ob.obBottom),
+      obSize: round(ob.obSize),
+      obSizeAtr: round(ob.obSizeAtr),
+      obAge: ob.obAge ?? null,
+      impulseStrength: round(ob.impulseStrength),
+      triggerBodyRatio: round(entry.bodyRatio),
+      triggerVolumeRatio: round(entry.volumeRatio),
+      emaPass,
+      rsiPass,
+      rrPass,
+      context: {
+        obTop: round(ob.obTop),
+        obBottom: round(ob.obBottom),
+        obMid: round(ob.obMid),
+        obSizeAtr: round(ob.obSizeAtr),
+        obAge: ob.obAge ?? null,
+        impulseStrength: round(ob.impulseStrength),
+        rrTp1: round(levels.rrTp1),
+        rrTp2: round(levels.rrTp2),
+        slAtrMultiple: round(levels.slAtrMultiple),
+      },
+    },
+    levels,
+  };
+}
+
 function buildLiquiditySweepReclaimCandidate(direction, indicators, options, marketRegime, config) {
   const { symbol, btcContext } = options;
   const { price, ema20, ema50, ema200, rsi, atr } = indicators;
@@ -3012,6 +3280,8 @@ export function buildSignalSetup(indicators, options = {}) {
       ? buildSessionBreakoutCandidate
       : experimentSignalConfig.strategyType === 'fairValueGap'
       ? buildFairValueGapCandidate
+      : experimentSignalConfig.strategyType === 'orderBlock'
+      ? buildOrderBlockCandidate
       : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
       ? buildLiquiditySweepReclaimCandidate
       : experimentSignalConfig.strategyType === 'trendPullbackContinuation'
@@ -3024,7 +3294,7 @@ export function buildSignalSetup(indicators, options = {}) {
   const finalScore = selected.total;
   const blockedReason = unique(selected.blockedReasons ?? []);
   const signalValidity =
-    ['sessionBreakout', 'fairValueGap'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
+    ['sessionBreakout', 'fairValueGap', 'orderBlock'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
       ? 'VALID'
       : classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
@@ -3073,7 +3343,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap'].includes(experimentSignalConfig.strategyType)
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock'].includes(experimentSignalConfig.strategyType)
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,

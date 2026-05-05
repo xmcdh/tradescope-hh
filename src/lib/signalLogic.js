@@ -1792,6 +1792,251 @@ function buildSessionBreakoutCandidate(direction, indicators, options, marketReg
   };
 }
 
+function averageVolumeForWindow(candles) {
+  const volumes = (candles ?? []).map((candle) => Number(candle?.volume)).filter(Number.isFinite);
+  return volumes.length ? volumes.reduce((sum, value) => sum + value, 0) / volumes.length : null;
+}
+
+function detectFVG(direction, candles, atr, config) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const currentIndex = candleList.length - 1;
+  const fvgLookback = Math.max(3, Math.floor(configNumber(config, 'fvgLookback', 50)));
+  const minFvgSizeAtr = configNumber(config, 'minFvgSizeAtr', 0.3);
+  const maxFvgSizeAtr = configNumber(config, 'maxFvgSizeAtr', 3);
+  const minCreationBodyRatio = configNumber(config, 'minCreationBodyRatio', 0.6);
+  const minCreationVolumeRatio = configNumber(config, 'minCreationVolumeRatio', 1.5);
+  const maxFvgAgeCandles = Math.max(1, Math.floor(configNumber(config, 'maxFvgAgeCandles', configNumber(config, 'maxFvgAgCandles', 30))));
+  const startIndex = Math.max(2, currentIndex - fvgLookback);
+
+  if (!Number.isFinite(atr) || atr <= 0 || currentIndex < 3) {
+    return { detected: false, reason: 'ATR or candle history unavailable for FVG detection.' };
+  }
+
+  for (let index = currentIndex - 1; index >= startIndex; index -= 1) {
+    const first = candleList[index - 2];
+    const creation = candleList[index - 1];
+    const third = candleList[index];
+    const creationRange = candleRange(creation);
+    const creationBody = candleBody(creation);
+    const creationBodyRatio = Number.isFinite(creationBody) && Number.isFinite(creationRange) && creationRange > 0
+      ? creationBody / creationRange
+      : null;
+    const creationAverageVolume = averageVolumeForWindow(candleList.slice(Math.max(0, index - 21), index - 1));
+    const creationVolume = Number(creation?.volume);
+    const creationVolumeRatio = Number.isFinite(creationAverageVolume) && creationAverageVolume > 0 && Number.isFinite(creationVolume)
+      ? creationVolume / creationAverageVolume
+      : null;
+    const bullishCreation = Number(creation?.close) > Number(creation?.open);
+    const bearishCreation = Number(creation?.close) < Number(creation?.open);
+    const fvgTop = direction === 'LONG' ? Number(third?.low) : Number(first?.low);
+    const fvgBottom = direction === 'LONG' ? Number(first?.high) : Number(third?.high);
+    const fvgSize = fvgTop - fvgBottom;
+    const fvgSizeAtr = fvgSize / atr;
+    const fvgAge = currentIndex - index;
+    const shapePass = direction === 'LONG'
+      ? Number(first?.high) < Number(third?.low) && bullishCreation
+      : Number(first?.low) > Number(third?.high) && bearishCreation;
+    const qualityPass =
+      shapePass &&
+      Number.isFinite(creationBodyRatio) && creationBodyRatio >= minCreationBodyRatio &&
+      Number.isFinite(creationVolumeRatio) && creationVolumeRatio >= minCreationVolumeRatio &&
+      Number.isFinite(fvgSizeAtr) && fvgSizeAtr >= minFvgSizeAtr && fvgSizeAtr <= maxFvgSizeAtr &&
+      fvgAge <= maxFvgAgeCandles;
+
+    if (!qualityPass) {
+      continue;
+    }
+
+    const candlesAfterFormation = candleList.slice(index + 1, currentIndex);
+    const filled = direction === 'LONG'
+      ? candlesAfterFormation.some((candle) => Number(candle?.low) <= fvgBottom)
+      : candlesAfterFormation.some((candle) => Number(candle?.high) >= fvgTop);
+
+    if (filled) {
+      continue;
+    }
+
+    return {
+      detected: true,
+      fvgTop,
+      fvgBottom,
+      fvgSize,
+      fvgSizeAtr,
+      fvgMid: (fvgTop + fvgBottom) / 2,
+      fvgAge,
+      creationVolume,
+      creationVolumeRatio,
+      creationBodyRatio,
+      formationIndex: index,
+      reason: `${direction} FVG detected at ${fvgSizeAtr.toFixed(2)}x ATR, age ${fvgAge} candles.`,
+    };
+  }
+
+  return { detected: false, reason: 'No valid unfilled FVG found in lookback.' };
+}
+
+function fvgEntryTriggered(direction, currentCandle, fvg) {
+  const close = Number(currentCandle?.close);
+  const low = Number(currentCandle?.low);
+  const high = Number(currentCandle?.high);
+
+  if (!fvg?.detected || !Number.isFinite(close)) {
+    return { triggered: false, entryPrice: close, reason: 'No detected FVG available for entry trigger.' };
+  }
+
+  const triggered = direction === 'LONG'
+    ? Number.isFinite(low) && low <= fvg.fvgTop && close >= fvg.fvgBottom
+    : Number.isFinite(high) && high >= fvg.fvgBottom && close <= fvg.fvgTop;
+
+  return {
+    triggered,
+    entryPrice: close,
+    reason: triggered
+      ? `${direction} FVG fill entry triggered.`
+      : `${direction} FVG fill entry not triggered.`
+  };
+}
+
+function buildFVGRiskLevels(direction, entry, fvg, atr, config) {
+  const stopBufferAtr = configNumber(config, 'stopBufferAtr', 0.2);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 2);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 3.5);
+  const rrMin = configNumber(config, 'rrMin', 1.8);
+
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !Number.isFinite(fvg?.fvgTop) || !Number.isFinite(fvg?.fvgBottom)) {
+    return { entry1: entry, entry2: null, tp1: null, tp2: null, sl: null, risk: null, rrTp1: null, rrTp2: null, rrRatio: null, atr, rrPass: false };
+  }
+
+  const sl = direction === 'LONG' ? fvg.fvgBottom - atr * stopBufferAtr : fvg.fvgTop + atr * stopBufferAtr;
+  const risk = direction === 'LONG' ? entry - sl : sl - entry;
+  const tp1 = direction === 'LONG' ? entry + risk * tp1RTarget : entry - risk * tp1RTarget;
+  const tp2 = direction === 'LONG' ? entry + risk * tp2RTarget : entry - risk * tp2RTarget;
+  const rrTp1 = risk > 0 ? tp1RTarget : null;
+  const rrTp2 = risk > 0 ? tp2RTarget : null;
+
+  return {
+    entry1: entry,
+    entry2: fvg.fvgMid,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: risk > 0 ? risk * tp1RTarget : null,
+    rewardTp2: risk > 0 ? risk * tp2RTarget : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+    rrPass: Number.isFinite(rrTp1) && rrTp1 >= rrMin,
+  };
+}
+
+function buildFairValueGapCandidate(direction, indicators, options, marketRegime, config) {
+  const { symbol, btcContext } = options;
+  const { price, ema50, rsi, atr } = indicators;
+  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const currentCandle = indicators.lastCandle ?? candles.at(-1);
+  const fvg = detectFVG(direction, candles, atr, config);
+  const entry = fvgEntryTriggered(direction, currentCandle, fvg);
+  const levels = buildFVGRiskLevels(direction, entry.entryPrice, fvg, atr, config);
+  const emaPass = config.emaFilter === false ? true : direction === 'LONG' ? price > ema50 : price < ema50;
+  const rsiMin = configNumber(config, 'rsiMin', 35);
+  const rsiMax = configNumber(config, 'rsiMax', 65);
+  const rsiPass = Number.isFinite(rsi) && rsi >= rsiMin && rsi <= rsiMax;
+  const rrPass = levels.rrPass === true;
+  const fvgQualityPoints = fvg.detected && fvg.fvgSizeAtr > 1 ? 2 : fvg.detected ? 1 : 0;
+  const fvgFreshPass = fvg.detected && fvg.fvgAge <= 10;
+  const rsiCenteredPass = Number.isFinite(rsi) && rsi >= 45 && rsi <= 55;
+  const rrAdequatePass = Number.isFinite(levels.rrTp1) && levels.rrTp1 >= 2;
+  const btcAdjustment = buildBtcAdjustment({ symbol, direction, btcContext });
+  const fundingOiAdjustment = buildFundingOiAdjustment(direction, indicators);
+  const items = [
+    scoreItem('fvgQuality', 'FVG quality', fvgQualityPoints, 2, fvg.detected, fvg.reason),
+    scoreItem('fvgFresh', 'FVG freshness', fvgFreshPass ? 1 : 0, 1, fvgFreshPass, fvgFreshPass ? 'FVG age <= 10 candles.' : 'FVG is stale or unavailable.'),
+    scoreItem('emaAligned', 'EMA50 alignment', emaPass ? 1 : 0, 1, emaPass, emaPass ? 'EMA50 alignment passed.' : 'EMA50 alignment failed.'),
+    scoreItem('rsiCentered', 'RSI centered', rsiCenteredPass ? 1 : 0, 1, rsiCenteredPass, Number.isFinite(rsi) ? `RSI ${rsi.toFixed(1)}.` : 'RSI unavailable.'),
+    scoreItem('rrAdequate', 'Risk/reward adequate', rrAdequatePass ? 1 : 0, 1, rrAdequatePass, `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'}.`),
+  ];
+  const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
+  const finalScore = clampScore(technicalTotal);
+  const blockedReasons = [];
+  const waitReasons = [];
+
+  if (!fvg.detected) waitReasons.push(fvg.reason);
+  if (!entry.triggered) waitReasons.push(entry.reason);
+  if (!rrPass) blockedReasons.push('FVG RR is below minimum or unavailable.');
+  if (!emaPass) blockedReasons.push('FVG EMA50 trend filter failed.');
+  if (!rsiPass) blockedReasons.push(`FVG RSI must be between ${rsiMin} and ${rsiMax}.`);
+  if (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0) {
+    blockedReasons.push('FVG risk levels are invalid.');
+  }
+
+  let status = 'NO_TRADE';
+  if (!blockedReasons.length && fvg.detected && entry.triggered) {
+    status = finalScore >= config.entryScore ? direction : finalScore >= 4 ? 'WAIT' : 'NO_TRADE';
+  } else if (!blockedReasons.length && finalScore >= 4) {
+    status = 'WAIT';
+  }
+
+  const checks = { fvgPass: fvg.detected, entryPass: entry.triggered, emaPass, rsiPass, rrPass };
+
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal,
+    adjustmentTotal: 0,
+    rawTotal: technicalTotal,
+    max: 6,
+    items,
+    adjustments: [],
+    breakdown: {
+      fvgQuality: items[0].points,
+      fvgFresh: items[1].points,
+      emaAligned: items[2].points,
+      rsiCentered: items[3].points,
+      rrAdequate: items[4].points,
+    },
+    hardBlock: blockedReasons[0] ?? null,
+    blockedReasons,
+    rejectionReasons: unique([...blockedReasons, ...waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    waitReasons,
+    warnings: unique([...fundingOiAdjustment.warnings, btcAdjustment.warning]),
+    entryContext: status === direction ? 'SAFE_ENTRY' : finalScore >= 4 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.SAFE_ENTRY : finalScore >= 4 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment,
+    fundingOiAdjustment,
+    checks,
+    diagnostics: {
+      strategyType: 'fairValueGap',
+      direction,
+      fvgDetected: fvg.detected,
+      entryTriggered: entry.triggered,
+      fvgTop: round(fvg.fvgTop),
+      fvgBottom: round(fvg.fvgBottom),
+      fvgSize: round(fvg.fvgSize),
+      fvgSizeAtr: round(fvg.fvgSizeAtr),
+      fvgAge: fvg.fvgAge ?? null,
+      creationVolumeRatio: round(fvg.creationVolumeRatio),
+      emaPass,
+      rsiPass,
+      rrPass,
+      context: {
+        fvgTop: round(fvg.fvgTop),
+        fvgBottom: round(fvg.fvgBottom),
+        fvgMid: round(fvg.fvgMid),
+        fvgSizeAtr: round(fvg.fvgSizeAtr),
+        fvgAge: fvg.fvgAge ?? null,
+        rrTp1: round(levels.rrTp1),
+        rrTp2: round(levels.rrTp2),
+        slAtrMultiple: round(levels.slAtrMultiple),
+      },
+    },
+    levels,
+  };
+}
+
 function buildLiquiditySweepReclaimCandidate(direction, indicators, options, marketRegime, config) {
   const { symbol, btcContext } = options;
   const { price, ema20, ema50, ema200, rsi, atr } = indicators;
@@ -2765,6 +3010,8 @@ export function buildSignalSetup(indicators, options = {}) {
       ? buildBreakoutVolumeExpansionCandidate
       : experimentSignalConfig.strategyType === 'sessionBreakout'
       ? buildSessionBreakoutCandidate
+      : experimentSignalConfig.strategyType === 'fairValueGap'
+      ? buildFairValueGapCandidate
       : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
       ? buildLiquiditySweepReclaimCandidate
       : experimentSignalConfig.strategyType === 'trendPullbackContinuation'
@@ -2777,7 +3024,7 @@ export function buildSignalSetup(indicators, options = {}) {
   const finalScore = selected.total;
   const blockedReason = unique(selected.blockedReasons ?? []);
   const signalValidity =
-    experimentSignalConfig.strategyType === 'sessionBreakout' && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
+    ['sessionBreakout', 'fairValueGap'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
       ? 'VALID'
       : classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
@@ -2826,7 +3073,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout'].includes(experimentSignalConfig.strategyType)
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap'].includes(experimentSignalConfig.strategyType)
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,

@@ -449,6 +449,18 @@ Gate 0.3R expectancy is correct and will not be lowered. The problem is not the 
 Next phase: v3 edge redesign.
 Constraint: must be fundamentally different from trend-following and sweep/reclaim patterns.
 
+### 2026-05-03 — V3-B Session Breakout Closed
+
+Best result: BTC/USDT 1h with retest confirmation
+- Trades: 149, WinRate: 36.91%, Exp: 0.1074R
+- False breakout rate: 42.86% within 3 candles
+- TP2 (3.5R) never reached in 180 trades
+- All tuning variants: No-Go
+
+Main blocker: institutional session boundaries do not apply cleanly to 24/7 crypto markets. False breakout rate too high to overcome with volume or retest filters alone.
+
+Decision: close V3-B, proceed to V3-C FVG.
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:

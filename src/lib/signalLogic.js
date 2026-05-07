@@ -2904,6 +2904,302 @@ function buildMeanReversionSqueezeCandidate(direction, indicators, options, mark
   };
 }
 
+
+function buildRsiSeries(candles, period) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const values = Array(candleList.length).fill(null);
+  if (candleList.length <= period) return values;
+  let gainSum = 0;
+  let lossSum = 0;
+  for (let index = 1; index <= period; index += 1) {
+    const change = Number(candleList[index]?.close) - Number(candleList[index - 1]?.close);
+    if (change >= 0) gainSum += change;
+    else lossSum -= change;
+  }
+  let averageGain = gainSum / period;
+  let averageLoss = lossSum / period;
+  values[period] = averageLoss === 0 ? 100 : 100 - 100 / (1 + averageGain / averageLoss);
+  for (let index = period + 1; index < candleList.length; index += 1) {
+    const change = Number(candleList[index]?.close) - Number(candleList[index - 1]?.close);
+    const gain = Math.max(change, 0);
+    const loss = Math.max(-change, 0);
+    averageGain = (averageGain * (period - 1) + gain) / period;
+    averageLoss = (averageLoss * (period - 1) + loss) / period;
+    values[index] = averageLoss === 0 ? 100 : 100 - 100 / (1 + averageGain / averageLoss);
+  }
+  return values;
+}
+
+function buildAdxSeries(candles, period) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const adx = Array(candleList.length).fill(null);
+  if (candleList.length <= period * 2) return adx;
+  const trueRanges = Array(candleList.length).fill(null);
+  const plusDm = Array(candleList.length).fill(0);
+  const minusDm = Array(candleList.length).fill(0);
+  for (let index = 1; index < candleList.length; index += 1) {
+    const current = candleList[index];
+    const previous = candleList[index - 1];
+    trueRanges[index] = trueRangeForCandle(current, previous);
+    const upMove = Number(current?.high) - Number(previous?.high);
+    const downMove = Number(previous?.low) - Number(current?.low);
+    plusDm[index] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDm[index] = downMove > upMove && downMove > 0 ? downMove : 0;
+  }
+  let atr = 0;
+  let plus = 0;
+  let minus = 0;
+  for (let index = 1; index <= period; index += 1) {
+    atr += trueRanges[index] ?? 0;
+    plus += plusDm[index] ?? 0;
+    minus += minusDm[index] ?? 0;
+  }
+  const dx = Array(candleList.length).fill(null);
+  for (let index = period; index < candleList.length; index += 1) {
+    if (index > period) {
+      atr = atr - atr / period + (trueRanges[index] ?? 0);
+      plus = plus - plus / period + (plusDm[index] ?? 0);
+      minus = minus - minus / period + (minusDm[index] ?? 0);
+    }
+    const plusDi = atr > 0 ? (100 * plus) / atr : null;
+    const minusDi = atr > 0 ? (100 * minus) / atr : null;
+    dx[index] = Number.isFinite(plusDi) && Number.isFinite(minusDi) && plusDi + minusDi > 0 ? (100 * Math.abs(plusDi - minusDi)) / (plusDi + minusDi) : null;
+  }
+  for (let index = period * 2 - 1; index < candleList.length; index += 1) {
+    if (index === period * 2 - 1) {
+      const seed = dx.slice(period, period * 2).filter(Number.isFinite);
+      adx[index] = seed.length === period ? seed.reduce((sum, value) => sum + value, 0) / period : null;
+    } else if (Number.isFinite(adx[index - 1]) && Number.isFinite(dx[index])) {
+      adx[index] = (adx[index - 1] * (period - 1) + dx[index]) / period;
+    }
+  }
+  return adx;
+}
+
+function detectRsiDivergenceReversal(direction, candles, config) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const currentIndex = candleList.length - 1;
+  const rsiPeriod = Math.max(1, Math.floor(configNumber(config, 'rsiPeriod', 14)));
+  const divergenceLookback = Math.max(1, Math.floor(configNumber(config, 'divergenceLookback', 50)));
+  const rsiMinDiff = configNumber(config, 'rsiMinDiff', 5);
+  const rsiBullMax = configNumber(config, 'rsiBullMax', 45);
+  const rsiBearMin = configNumber(config, 'rsiBearMin', 55);
+  const pivotLookback = Math.max(1, Math.floor(configNumber(config, 'pivotLookback', 10)));
+  const confirmationWindow = Math.max(1, Math.floor(configNumber(config, 'confirmationWindow', 5)));
+  const confirmBodyRatio = configNumber(config, 'confirmBodyRatio', 0.5);
+  const adxPeriod = Math.max(1, Math.floor(configNumber(config, 'adxPeriod', 14)));
+  const minHistory = rsiPeriod + divergenceLookback + confirmationWindow + pivotLookback + adxPeriod * 2;
+
+  if (candleList.length < minHistory) {
+    return { detected: false, reason: 'Insufficient candle history for RSI divergence.', divergenceDetected: false, pivotConfirmed: false, confirmationDetected: false };
+  }
+
+  const rsiSeries = buildRsiSeries(candleList, rsiPeriod);
+  const atrSeries = buildAtrSeries(candleList, rsiPeriod);
+  const adxSeries = buildAdxSeries(candleList, adxPeriod);
+  const confirmationCandle = candleList[currentIndex];
+  const confirmationRange = candleRange(confirmationCandle);
+  const confirmationBody = candleBody(confirmationCandle);
+  const confirmationBodyRatio = Number.isFinite(confirmationBody) && Number.isFinite(confirmationRange) && confirmationRange > 0 ? confirmationBody / confirmationRange : null;
+  const confirmationDirectionPass = direction === 'LONG'
+    ? Number(confirmationCandle?.close) > Number(confirmationCandle?.open)
+    : Number(confirmationCandle?.close) < Number(confirmationCandle?.open);
+  const confirmationBodyPass = Number.isFinite(confirmationBodyRatio) && confirmationBodyRatio >= confirmBodyRatio;
+
+  let best = null;
+  for (let pivotIndex = currentIndex - 1; pivotIndex >= Math.max(0, currentIndex - confirmationWindow); pivotIndex -= 1) {
+    const baseIndex = pivotIndex - divergenceLookback;
+    if (baseIndex < 0) continue;
+    const pivot = candleList[pivotIndex];
+    const base = candleList[baseIndex];
+    const pivotRsi = rsiSeries[pivotIndex];
+    const baseRsi = rsiSeries[baseIndex];
+    if (!Number.isFinite(pivotRsi) || !Number.isFinite(baseRsi)) continue;
+    const pivotWindow = candleList.slice(Math.max(0, pivotIndex - pivotLookback + 1), pivotIndex + 1);
+    const pivotLow = Math.min(...pivotWindow.map((candle) => Number(candle.low)).filter(Number.isFinite));
+    const pivotHigh = Math.max(...pivotWindow.map((candle) => Number(candle.high)).filter(Number.isFinite));
+    const pivotConfirmed = direction === 'LONG'
+      ? Number(pivot?.low) <= pivotLow
+      : Number(pivot?.high) >= pivotHigh;
+    const rsiDiff = direction === 'LONG' ? pivotRsi - baseRsi : baseRsi - pivotRsi;
+    const divergencePass = direction === 'LONG'
+      ? Number(pivot?.low) < Number(base?.low) && rsiDiff >= rsiMinDiff && pivotRsi <= rsiBullMax
+      : Number(pivot?.high) > Number(base?.high) && rsiDiff >= rsiMinDiff && pivotRsi >= rsiBearMin;
+    if (!divergencePass || !pivotConfirmed) continue;
+
+    let earlierConfirmation = false;
+    for (let index = pivotIndex + 1; index < currentIndex; index += 1) {
+      const candle = candleList[index];
+      const range = candleRange(candle);
+      const body = candleBody(candle);
+      const bodyRatio = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
+      const directionPass = direction === 'LONG' ? Number(candle?.close) > Number(candle?.open) : Number(candle?.close) < Number(candle?.open);
+      if (directionPass && Number.isFinite(bodyRatio) && bodyRatio >= confirmBodyRatio) earlierConfirmation = true;
+    }
+    if (earlierConfirmation) continue;
+
+    best = {
+      pivotIndex,
+      baseIndex,
+      pivot,
+      base,
+      pivotRsi,
+      baseRsi,
+      rsiDiff,
+      divergenceAgeCandles: pivotIndex - baseIndex,
+      candlesToConfirmation: currentIndex - pivotIndex,
+      pivotConfirmed,
+      divergenceDetected: true,
+    };
+    break;
+  }
+
+  if (!best) {
+    return { detected: false, reason: 'No fresh confirmed RSI divergence pivot.', divergenceDetected: false, pivotConfirmed: false, confirmationDetected: false };
+  }
+
+  const confirmationDetected = confirmationDirectionPass && confirmationBodyPass;
+  const adx = adxSeries[currentIndex];
+  const atr = atrSeries[currentIndex];
+  const recentSwingWindow = candleList.slice(Math.max(0, currentIndex - 19), currentIndex + 1);
+  const swingHigh = Math.max(...recentSwingWindow.map((candle) => Number(candle.high)).filter(Number.isFinite));
+  const swingLow = Math.min(...recentSwingWindow.map((candle) => Number(candle.low)).filter(Number.isFinite));
+  const currentHigh = Number(confirmationCandle?.high);
+  const currentLow = Number(confirmationCandle?.low);
+  const nearMajorSwing = direction === 'LONG'
+    ? Number.isFinite(currentLow) && Number.isFinite(swingLow) && currentLow <= swingLow
+    : Number.isFinite(currentHigh) && Number.isFinite(swingHigh) && currentHigh >= swingHigh;
+
+  return {
+    detected: confirmationDetected,
+    reason: confirmationDetected ? `${direction} RSI divergence reversal detected.` : 'Divergence found but confirmation candle failed.',
+    divergenceDetected: true,
+    pivotConfirmed: true,
+    confirmationDetected,
+    pivotIndex: best.pivotIndex,
+    baseIndex: best.baseIndex,
+    pivotExtreme: direction === 'LONG' ? Number(best.pivot.low) : Number(best.pivot.high),
+    pivotRsi: best.pivotRsi,
+    baseRsi: best.baseRsi,
+    rsiDiff: best.rsiDiff,
+    divergenceAgeCandles: best.divergenceAgeCandles,
+    candlesToConfirmation: best.candlesToConfirmation,
+    confirmationBodyRatio,
+    adx,
+    atr,
+    nearMajorSwing,
+  };
+}
+
+function buildRsiDivergenceRiskLevels(direction, entry, divergence, atr, config) {
+  const stopBufferAtr = configNumber(config, 'stopBufferAtr', 0.25);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 1.5);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 2.5);
+  const rrMin = configNumber(config, 'rrMin', 1.5);
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !Number.isFinite(divergence?.pivotExtreme)) {
+    return { entry1: entry, entry2: null, tp1: null, tp2: null, sl: null, risk: null, rrTp1: null, rrTp2: null, rrRatio: null, atr, rrPass: false };
+  }
+  const sl = direction === 'LONG' ? divergence.pivotExtreme - atr * stopBufferAtr : divergence.pivotExtreme + atr * stopBufferAtr;
+  const risk = direction === 'LONG' ? entry - sl : sl - entry;
+  const tp1 = direction === 'LONG' ? entry + risk * tp1RTarget : entry - risk * tp1RTarget;
+  const tp2 = direction === 'LONG' ? entry + risk * tp2RTarget : entry - risk * tp2RTarget;
+  const rrTp1 = risk > 0 ? tp1RTarget : null;
+  const rrTp2 = risk > 0 ? tp2RTarget : null;
+  return {
+    entry1: entry,
+    entry2: null,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: risk > 0 ? risk * tp1RTarget : null,
+    rewardTp2: risk > 0 ? risk * tp2RTarget : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+    rrPass: Number.isFinite(rrTp1) && rrTp1 >= rrMin,
+  };
+}
+
+function buildRsiDivergenceCandidate(direction, indicators, options, marketRegime, config) {
+  const { currentVolume, averageVolume } = indicators;
+  const candles = Array.isArray(indicators.extendedCandles)
+    ? indicators.extendedCandles
+    : Array.isArray(indicators.recentCandles)
+    ? indicators.recentCandles
+    : [];
+  const currentCandle = indicators.lastCandle ?? candles.at(-1);
+  const entry = Number(currentCandle?.close ?? indicators.price);
+  const divergence = detectRsiDivergenceReversal(direction, candles, config);
+  const atr = Number.isFinite(divergence.atr) ? divergence.atr : indicators.atr;
+  const levels = buildRsiDivergenceRiskLevels(direction, entry, divergence, atr, config);
+  const adxMax = configNumber(config, 'adxMax', 30);
+  const adxPass = divergence.detected && Number.isFinite(divergence.adx) && divergence.adx < adxMax;
+  const swingPass = divergence.detected && divergence.nearMajorSwing !== true;
+  const rrPass = levels.rrPass === true;
+  const volumeRatio = Number.isFinite(currentVolume) && Number.isFinite(averageVolume) && averageVolume > 0 ? currentVolume / averageVolume : null;
+  const strongDivergencePass = (divergence.rsiDiff ?? 0) >= 8;
+  const lowAdxPass = Number.isFinite(divergence.adx) && divergence.adx < 20;
+  const volumeConfirmPass = Number.isFinite(volumeRatio) && volumeRatio > 1.3;
+  const developedPass = (divergence.divergenceAgeCandles ?? 0) >= 30;
+  const items = [
+    scoreItem('strongRsiDivergence', 'RSI divergence >= 8 points', strongDivergencePass ? 1 : 0, 1, strongDivergencePass, `RSI diff ${Number.isFinite(divergence.rsiDiff) ? divergence.rsiDiff.toFixed(2) : '--'}.`),
+    scoreItem('lowAdx', 'ADX below 20', lowAdxPass ? 1 : 0, 1, lowAdxPass, `ADX ${Number.isFinite(divergence.adx) ? divergence.adx.toFixed(2) : '--'}.`),
+    scoreItem('confirmationVolume', 'Confirmation volume > 1.3x average', volumeConfirmPass ? 1 : 0, 1, volumeConfirmPass, `Volume ratio ${Number.isFinite(volumeRatio) ? volumeRatio.toFixed(2) : '--'}.`),
+    scoreItem('developedDivergence', 'Divergence developed over >= 30 candles', developedPass ? 1 : 0, 1, developedPass, `Divergence age ${divergence.divergenceAgeCandles ?? 0} candles.`),
+  ];
+  const finalScore = items.reduce((sum, item) => sum + item.points, 0);
+  const blockedReasons = [];
+  const waitReasons = [];
+  if (!divergence.detected) waitReasons.push(divergence.reason);
+  if (divergence.detected && !adxPass) blockedReasons.push('RSI divergence ADX filter failed.');
+  if (divergence.detected && !swingPass) blockedReasons.push('RSI divergence too close to major swing.');
+  if (divergence.detected && !rrPass) blockedReasons.push('RSI divergence RR is below minimum or unavailable.');
+  if (divergence.detected && (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0)) blockedReasons.push('RSI divergence risk levels are invalid.');
+  let status = 'NO_TRADE';
+  if (!blockedReasons.length && divergence.detected) status = finalScore >= config.entryScore ? direction : finalScore >= 2 ? 'WAIT' : 'NO_TRADE';
+  const checks = { rsiPass: divergence.divergenceDetected === true, volumePass: true, rrPass, levelPass: divergence.detected, macdPass: true };
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal: finalScore,
+    adjustmentTotal: 0,
+    rawTotal: finalScore,
+    max: items.length,
+    items,
+    adjustments: [],
+    breakdown: Object.fromEntries(items.map((item) => [item.key, item.points])),
+    hardBlock: blockedReasons[0] ?? null,
+    blockedReasons,
+    rejectionReasons: unique([...blockedReasons, ...waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    waitReasons,
+    warnings: [],
+    entryContext: status === direction ? 'SAFE_ENTRY' : finalScore >= 2 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.SAFE_ENTRY : finalScore >= 2 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment: { points: 0, warning: null },
+    fundingOiAdjustment: { points: 0, warnings: [] },
+    checks,
+    diagnostics: {
+      strategyType: 'rsiDivergenceReversal',
+      direction,
+      divergenceDetected: divergence.divergenceDetected === true,
+      pivotConfirmed: divergence.pivotConfirmed === true,
+      confirmationDetected: divergence.confirmationDetected === true,
+      adxPass,
+      swingPass,
+      rrPass,
+      score: finalScore,
+      rsiDiff: round(divergence.rsiDiff),
+      adx: round(divergence.adx),
+      candlesToConfirmation: divergence.candlesToConfirmation ?? null,
+    },
+    levels,
+  };
+}
+
 function buildLiquiditySweepReclaimCandidate(direction, indicators, options, marketRegime, config) {
   const { symbol, btcContext } = options;
   const { price, ema20, ema50, ema200, rsi, atr } = indicators;
@@ -3883,6 +4179,8 @@ export function buildSignalSetup(indicators, options = {}) {
       ? buildOrderBlockCandidate
       : experimentSignalConfig.strategyType === 'meanReversionSqueeze'
       ? buildMeanReversionSqueezeCandidate
+      : experimentSignalConfig.strategyType === 'rsiDivergenceReversal'
+      ? buildRsiDivergenceCandidate
       : experimentSignalConfig.strategyType === 'failedBreakoutReversion'
       ? buildFailedBreakoutCandidate
       : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
@@ -3897,7 +4195,7 @@ export function buildSignalSetup(indicators, options = {}) {
   const finalScore = selected.total;
   const blockedReason = unique(selected.blockedReasons ?? []);
   const signalValidity =
-    ['sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
+    ['sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze', 'rsiDivergenceReversal'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
       ? 'VALID'
       : classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
@@ -3946,7 +4244,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze'].includes(experimentSignalConfig.strategyType)
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze', 'rsiDivergenceReversal'].includes(experimentSignalConfig.strategyType)
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,

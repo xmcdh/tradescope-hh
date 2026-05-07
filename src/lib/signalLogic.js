@@ -2378,12 +2378,22 @@ function detectCompressionRange(candles, atr, config) {
     return { valid: false, reason: 'ATR or candle history unavailable for failed breakout compression.', candlesInside: 0 };
   }
 
-  const rangeCandles = candleList.slice(-(compressionLookback + 1), -1);
-  const highs = rangeCandles.map((candle) => Number(candle?.high)).filter(Number.isFinite);
-  const lows = rangeCandles.map((candle) => Number(candle?.low)).filter(Number.isFinite);
+  const priorWindowSize = Math.floor(compressionLookback / 2);
+  const priorCandles = candleList.slice(
+    -(compressionLookback + 1 + priorWindowSize),
+    -(compressionLookback + 1),
+  );
+  const currentCandles = candleList.slice(-(compressionLookback + 1), -1);
 
-  if (highs.length < compressionLookback || lows.length < compressionLookback) {
-    return { valid: false, reason: 'Compression range has incomplete candles.', candlesInside: 0 };
+  if (priorCandles.length < priorWindowSize || currentCandles.length < compressionLookback) {
+    return { valid: false, reason: 'Insufficient history for prior compression range.', candlesInside: 0 };
+  }
+
+  const highs = priorCandles.map((candle) => Number(candle?.high)).filter(Number.isFinite);
+  const lows = priorCandles.map((candle) => Number(candle?.low)).filter(Number.isFinite);
+
+  if (highs.length < priorWindowSize || lows.length < priorWindowSize) {
+    return { valid: false, reason: 'Compression range has incomplete prior candles.', candlesInside: 0 };
   }
 
   const rangeHigh = Math.max(...highs);
@@ -2393,7 +2403,7 @@ function detectCompressionRange(candles, atr, config) {
   const maxRangeSizeAtr = configNumber(config, 'maxRangeSizeAtr', 2);
   const minCandlesInsideRange = Math.max(1, Math.floor(configNumber(config, 'minCandlesInsideRange', 15)));
   const rangeBuffer = atr * 0.05;
-  const candlesInside = rangeCandles.filter((candle) => Number(candle?.high) <= rangeHigh + rangeBuffer && Number(candle?.low) >= rangeLow - rangeBuffer).length;
+  const candlesInside = currentCandles.filter((candle) => Number(candle?.high) <= rangeHigh + rangeBuffer && Number(candle?.low) >= rangeLow - rangeBuffer).length;
   const valid = Number.isFinite(rangeSizeAtr) && rangeSizeAtr <= maxRangeSizeAtr && candlesInside >= minCandlesInsideRange;
 
   return {

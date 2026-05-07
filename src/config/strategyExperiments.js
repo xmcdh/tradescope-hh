@@ -917,7 +917,7 @@ export const v3EdgeRedesignExperiments = [
     signalLogic: {
       strategyType: 'failedBreakoutReversion',
       compressionLookback: 20,
-      maxRangeSizeAtr: 2.0,
+      maxRangeSizeAtr: 4.0,
       minCandlesInsideRange: 15,
       failureWindowCandles: 3,
       minBreakoutVolumeRatio: 1.2,

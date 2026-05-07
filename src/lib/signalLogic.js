@@ -2540,7 +2540,7 @@ function buildFailedBreakoutCandidate(direction, indicators, options, marketRegi
   const compressionQualityPoints = activeRange.candlesInside >= 18 ? 2 : activeRange.candlesInside >= 15 ? 1 : 0;
   const breakoutVolumePass = Number.isFinite(failure.breakoutVolumeRatio) && failure.breakoutVolumeRatio >= 1.5;
   const failureSpeedPass = failure.candlesToFailure === 1;
-  const rrAdequatePass = Number.isFinite(levels.rrTp1) && levels.rrTp1 >= 1.8;
+  const rrAdequatePass = Number.isFinite(levels.rrTp1) && levels.rrTp1 >= configNumber(config, 'rrMin', 1.8);
   const items = [
     scoreItem('compressionQuality', 'Compression quality', compressionQualityPoints, 2, activeRange.valid, `${activeRange.candlesInside ?? 0}/${activeRange.lookback ?? 0} candles inside range.`),
     scoreItem('breakoutVolume', 'Breakout volume', breakoutVolumePass ? 1 : 0, 1, breakoutVolumePass, `Breakout volume ratio ${Number.isFinite(failure.breakoutVolumeRatio) ? failure.breakoutVolumeRatio.toFixed(2) : '--'}.`),

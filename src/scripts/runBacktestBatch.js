@@ -90,6 +90,7 @@ async function main() {
   const proxyBaseUrl = args['proxy-base-url'] ?? args.proxyBaseUrl;
   const experimentId = args.experiment ?? args.experimentId ?? '';
   const dumpSignals = args['dump-signals'] ?? args.dumpSignals ?? 0;
+  const debugOb = args['debug-ob'] === true || args.debugOb === true || args['debug-ob'] === 'true' || args.debugOb === 'true';
   const experiment = getStrategyExperiment(experimentId);
 
   if (experimentId && !experiment) {
@@ -117,6 +118,7 @@ async function main() {
           proxyBaseUrl,
           experimentId,
           dumpSignals,
+          debugOb,
           writeFile: true,
         });
 

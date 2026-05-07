@@ -175,6 +175,7 @@ export async function executeBacktestRun({
   writeFile = true,
   dumpSignals = 0,
   experimentId = '',
+  debugOb = false,
 }) {
   const normalizedPair = normalizePair(pair);
   const fromMs = requiredDate(from, 'from');
@@ -281,6 +282,20 @@ export async function executeBacktestRun({
     });
   }
 
+  if (debugOb) {
+    console.log(
+      JSON.stringify(
+        {
+          pair: normalizedPair,
+          timeframe,
+          orderBlock: backtest.diagnostics?.orderBlock ?? null,
+        },
+        null,
+        2,
+      ),
+    );
+  }
+
   if (integrity.issues.length) {
     payload.warnings = integrity.issues;
   }
@@ -332,6 +347,7 @@ async function main() {
       writeFile: true,
       dumpSignals: args['dump-signals'] ?? args.dumpSignals ?? 0,
       experimentId: args.experiment ?? args.experimentId ?? '',
+      debugOb: args['debug-ob'] === true || args.debugOb === true || args['debug-ob'] === 'true' || args.debugOb === 'true',
     });
 
     const debugSignals = args['debug-signals'] === true || args.debugSignals === true || args['debug-signals'] === 'true' || args.debugSignals === 'true';

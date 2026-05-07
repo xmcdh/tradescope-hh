@@ -76,6 +76,9 @@ export function getExperimentFamily(experimentId = '') {
 export const v12AtrRetestCalibrationExperiments = [
   {
     experimentId: 'v1.2-confirmation-score',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.2-confirmation-score',
     label: 'Retest confirmation score calibration',
     candidateOnly: true,
@@ -100,6 +103,9 @@ export const v12AtrRetestCalibrationExperiments = [
   },
   {
     experimentId: 'v1.2-retest-window',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.2-retest-window',
     label: 'Retest wait window calibration',
     candidateOnly: true,
@@ -117,6 +123,9 @@ export const v12AtrRetestCalibrationExperiments = [
   },
   {
     experimentId: 'v1.2-retest-tolerance',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.2-retest-tolerance',
     label: 'Retest tolerance calibration',
     candidateOnly: true,
@@ -136,6 +145,9 @@ export const v12AtrRetestCalibrationExperiments = [
   },
   {
     experimentId: 'v1.2-atr-geometry',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.2-atr-geometry',
     label: 'ATR SL/TP geometry calibration',
     candidateOnly: true,
@@ -159,6 +171,9 @@ export const v12AtrRetestCalibrationExperiments = [
   },
   {
     experimentId: 'v1.2-confirmation-close',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.2-confirmation-close',
     label: 'Confirmation close rule calibration',
     candidateOnly: true,
@@ -179,6 +194,9 @@ export const v12AtrRetestCalibrationExperiments = [
 export const v13StrategyRedesignExperiments = [
   {
     experimentId: 'v1.3-trend-pullback-continuation',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.3-trend-pullback-continuation',
     label: 'Trend pullback continuation',
     candidateOnly: true,
@@ -200,6 +218,9 @@ export const v13StrategyRedesignExperiments = [
 export const v14QualityFilterExperiments = [
   {
     experimentId: 'v1.4-trend-strength-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.4-trend-strength-filter',
     label: 'Trend strength quality filter',
     candidateOnly: true,
@@ -221,6 +242,9 @@ export const v14QualityFilterExperiments = [
   },
   {
     experimentId: 'v1.4-htf-alignment-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.4-htf-alignment-filter',
     label: 'Higher timeframe alignment quality filter',
     candidateOnly: true,
@@ -243,6 +267,9 @@ export const v14QualityFilterExperiments = [
   },
   {
     experimentId: 'v1.4-volatility-regime-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.4-volatility-regime-filter',
     label: 'Volatility regime quality filter',
     candidateOnly: true,
@@ -263,6 +290,9 @@ export const v14QualityFilterExperiments = [
   },
   {
     experimentId: 'v1.4-chop-avoidance-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.4-chop-avoidance-filter',
     label: 'Chop avoidance quality filter',
     candidateOnly: true,
@@ -275,6 +305,9 @@ export const v14QualityFilterExperiments = [
   },
   {
     experimentId: 'v1.4-impulse-quality-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.4-impulse-quality-filter',
     label: 'Impulse quality filter',
     candidateOnly: true,
@@ -300,6 +333,9 @@ export const v14QualityFilterExperiments = [
 export const v15ExitGeometryExperiments = [
   {
     experimentId: 'v1.5-exit-rr2-target',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.5-exit-rr2-target',
     label: 'Single full exit at runner target',
     candidateOnly: true,
@@ -318,6 +354,9 @@ export const v15ExitGeometryExperiments = [
   },
   {
     experimentId: 'v1.5-partial-tp-runner',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.5-partial-tp-runner',
     label: '50% TP1, 50% runner to TP2',
     candidateOnly: true,
@@ -339,6 +378,9 @@ export const v15ExitGeometryExperiments = [
   },
   {
     experimentId: 'v1.5-breakeven-after-1r',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.5-breakeven-after-1r',
     label: 'Breakeven after +1R',
     candidateOnly: true,
@@ -358,6 +400,9 @@ export const v15ExitGeometryExperiments = [
   },
   {
     experimentId: 'v1.5-trailing-after-1r',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.5-trailing-after-1r',
     label: 'ATR trail after +1R',
     candidateOnly: true,
@@ -396,6 +441,9 @@ export const v16RegimeFilterExperiments = [
   {
     ...V16_BASE_EXPERIMENT,
     experimentId: 'v1.6-impulse-filter-soft',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.6-impulse-filter-soft',
     label: 'Regime filter: soft impulse quality',
     regimeFilter: {
@@ -413,6 +461,9 @@ export const v16RegimeFilterExperiments = [
   {
     ...V16_BASE_EXPERIMENT,
     experimentId: 'v1.6-impulse-filter-medium',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.6-impulse-filter-medium',
     label: 'Regime filter: medium impulse quality',
     regimeFilter: {
@@ -430,6 +481,9 @@ export const v16RegimeFilterExperiments = [
   {
     ...V16_BASE_EXPERIMENT,
     experimentId: 'v1.6-low-volatility-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.6-low-volatility-filter',
     label: 'Regime filter: low volatility only',
     regimeFilter: {
@@ -448,6 +502,9 @@ export const v16RegimeFilterExperiments = [
   {
     ...V16_BASE_EXPERIMENT,
     experimentId: 'v1.6-bearish-regime-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.6-bearish-regime-filter',
     label: 'Regime filter: bearish trend regime',
     regimeFilter: {
@@ -465,6 +522,9 @@ export const v16RegimeFilterExperiments = [
   {
     ...V16_BASE_EXPERIMENT,
     experimentId: 'v1.6-combined-regime-filter',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v1.6-combined-regime-filter',
     label: 'Regime filter: combined objective regime',
     regimeFilter: {
@@ -530,6 +590,9 @@ export const v2StrategyRedesignExperiments = [
   },
   {
     experimentId: 'v2-breakout-volume-expansion',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v2-breakout-volume-expansion',
     label: 'Breakout after volume and volatility expansion',
     candidateOnly: true,
@@ -565,6 +628,9 @@ export const v2StrategyRedesignExperiments = [
   },
   {
     experimentId: 'v2.1-breakout-close-buffer-soft',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v2.1-breakout-close-buffer-soft',
     label: 'Breakout close buffer soft calibration',
     candidateOnly: true,
@@ -600,6 +666,9 @@ export const v2StrategyRedesignExperiments = [
   },
   {
     experimentId: 'v2.1-breakout-body-soft',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v2.1-breakout-body-soft',
     label: 'Breakout body quality soft calibration',
     candidateOnly: true,
@@ -636,6 +705,9 @@ export const v2StrategyRedesignExperiments = [
   },
   {
     experimentId: 'v2.1-opposing-room-soft',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v2.1-opposing-room-soft',
     label: 'Opposing-level room soft calibration',
     candidateOnly: true,
@@ -671,6 +743,9 @@ export const v2StrategyRedesignExperiments = [
   },
   {
     experimentId: 'v2.1-volume-expansion-soft',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v2.1-volume-expansion-soft',
     label: 'Volume and range expansion soft calibration',
     candidateOnly: true,
@@ -707,6 +782,9 @@ export const v2StrategyRedesignExperiments = [
   },
   {
     experimentId: 'v2.1-breakout-structure-balanced',
+    status: 'ARCHIVED',
+    closedAt: '2026-05-07',
+    closedReason: 'superseded_by_v3_research',
     strategyVersion: 'v2.1-breakout-structure-balanced',
     label: 'Balanced breakout structure calibration',
     candidateOnly: true,
@@ -832,7 +910,36 @@ export const v3EdgeRedesignExperiments = [
     unchangedGates: [...COMMON_UNCHANGED_GATES],
   },
   {
+    experimentId: 'v3-failed-breakout-reversion',
+    strategyVersion: 'v3-failed-breakout-reversion',
+    label: 'Failed breakout trap reversion',
+    candidateOnly: true,
+    signalLogic: {
+      strategyType: 'failedBreakoutReversion',
+      compressionLookback: 20,
+      maxRangeSizeAtr: 2.0,
+      minCandlesInsideRange: 15,
+      failureWindowCandles: 3,
+      minBreakoutVolumeRatio: 1.2,
+      stopBufferAtr: 0.2,
+      tp1RTarget: 1.5,
+      tp2RTarget: 2.5,
+      rrMin: 1.3,
+      entryScore: 5,
+      rsiMin: 35,
+      rsiMax: 65,
+    },
+    approvalScope: 'backtest-only',
+    unchangedGates: [...COMMON_UNCHANGED_GATES],
+  },
+  {
     experimentId: 'v3-order-block',
+    status: 'NOT_READY',
+    closedAt: '2026-05-07',
+    closedReason: 'implementation_bug_rr_invalid',
+    bestResult: { trades: 0 },
+    verdict: 'NOT_PROMOTABLE',
+    nextCandidate: 'v3-failed-breakout-reversion',
     strategyVersion: 'v3-order-block',
     label: 'Institutional order block reversal',
     candidateOnly: true,

@@ -2050,8 +2050,16 @@ function detectOrderBlock(direction, candles, atr, config) {
   const startIndex = Math.max(0, currentIndex - obLookback);
 
   if (!Number.isFinite(atr) || atr <= 0 || currentIndex < impulseWindowCandles + 1) {
-    return { detected: false, reason: 'ATR or candle history unavailable for OB detection.' };
+    return { detected: false, reason: 'ATR or candle history unavailable for OB detection.', reasonCode: 'atrZeroOrNull', atr };
   }
+
+  const rejectionCounts = {
+    obViolated: 0,
+    obTooOld: 0,
+    obSizeTooSmall: 0,
+    obSizeTooLarge: 0,
+    noImpulseMove: 0,
+  };
 
   for (let index = currentIndex - impulseWindowCandles - 1; index >= startIndex; index -= 1) {
     const orderBlockCandle = candleList[index];
@@ -2085,6 +2093,12 @@ function detectOrderBlock(direction, candles, atr, config) {
       obAge <= maxObAgeCandles;
 
     if (!qualityPass) {
+      if (shapePass) {
+        if (Number.isFinite(obSizeAtr) && obSizeAtr < minObSizeAtr) rejectionCounts.obSizeTooSmall += 1;
+        if (Number.isFinite(obSizeAtr) && obSizeAtr > maxObSizeAtr) rejectionCounts.obSizeTooLarge += 1;
+        if (!impulsePass) rejectionCounts.noImpulseMove += 1;
+        if (obAge > maxObAgeCandles) rejectionCounts.obTooOld += 1;
+      }
       continue;
     }
 
@@ -2094,6 +2108,7 @@ function detectOrderBlock(direction, candles, atr, config) {
       : afterImpulse.some((candle) => Number(candle?.close) > obTop);
 
     if (violated) {
+      rejectionCounts.obViolated += 1;
       continue;
     }
 
@@ -2108,11 +2123,20 @@ function detectOrderBlock(direction, candles, atr, config) {
       impulseStrength,
       bodyRatio,
       formationIndex: index,
+      atr,
+      rejectionCounts,
       reason: `${direction} OB detected with ${impulseStrength.toFixed(2)}x ATR impulse, age ${obAge} candles.`,
     };
   }
 
-  return { detected: false, reason: 'No valid unviolated OB found in lookback.' };
+  const primaryReason = Object.entries(rejectionCounts).sort((left, right) => right[1] - left[1])[0];
+  return {
+    detected: false,
+    reason: 'No valid unviolated OB found in lookback.',
+    reasonCode: primaryReason?.[1] > 0 ? primaryReason[0] : 'obNotDetected',
+    rejectionCounts,
+    atr,
+  };
 }
 
 function obEntryTriggered(direction, currentCandle, ob, indicators, config) {
@@ -2135,9 +2159,21 @@ function obEntryTriggered(direction, currentCandle, ob, indicators, config) {
   const zoneTouched = direction === 'LONG'
     ? Number.isFinite(low) && low <= ob.obTop && close >= ob.obBottom
     : Number.isFinite(high) && high >= ob.obBottom && close <= ob.obTop;
+  const priceReturned = direction === 'LONG'
+    ? Number.isFinite(low) && low <= ob.obTop
+    : Number.isFinite(high) && high >= ob.obBottom;
+  const closeRespected = direction === 'LONG'
+    ? close >= ob.obBottom
+    : close <= ob.obTop;
   const bodyPass = Number.isFinite(bodyRatio) && bodyRatio >= minTriggerBodyRatio;
   const volumePass = Number.isFinite(volumeRatio) && volumeRatio >= minTriggerVolumeRatio;
   const triggered = zoneTouched && bodyPass && volumePass;
+  const reasonCodes = [];
+
+  if (!priceReturned) reasonCodes.push('priceNotReturnedToOB');
+  if (priceReturned && !closeRespected) reasonCodes.push('triggerClosedBelowOB');
+  if (!bodyPass) reasonCodes.push('bodyRatioTooLow');
+  if (!volumePass) reasonCodes.push('volumeTooLow');
 
   return {
     triggered,
@@ -2145,8 +2181,11 @@ function obEntryTriggered(direction, currentCandle, ob, indicators, config) {
     bodyRatio,
     volumeRatio,
     zoneTouched,
+    priceReturned,
+    closeRespected,
     bodyPass,
     volumePass,
+    reasonCodes,
     reason: triggered ? `${direction} OB return entry triggered.` : `${direction} OB return entry not triggered.`,
   };
 }
@@ -2227,13 +2266,29 @@ function buildOrderBlockCandidate(direction, indicators, options, marketRegime, 
   const finalScore = clampScore(technicalTotal);
   const blockedReasons = [];
   const waitReasons = [];
+  const rejectionReasonCodes = [];
 
-  if (!ob.detected) waitReasons.push(ob.reason);
-  if (!entry.triggered) waitReasons.push(entry.reason);
-  if (!rrPass) blockedReasons.push('OB RR is below minimum or unavailable.');
-  if (!emaPass) blockedReasons.push('OB EMA50 slope filter failed.');
-  if (!rsiPass) blockedReasons.push(`OB RSI must be between ${rsiMin} and ${rsiMax}.`);
-  if (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0) {
+  if (!ob.detected) {
+    waitReasons.push(ob.reason);
+    rejectionReasonCodes.push(ob.reasonCode ?? 'obNotDetected');
+  }
+  if (!entry.triggered) {
+    waitReasons.push(entry.reason);
+    rejectionReasonCodes.push(...(entry.reasonCodes ?? []));
+  }
+  if (entry.triggered && !rrPass) {
+    blockedReasons.push('OB RR is below minimum or unavailable.');
+    rejectionReasonCodes.push('rrFailed');
+  }
+  if (!emaPass) {
+    blockedReasons.push('OB EMA50 slope filter failed.');
+    rejectionReasonCodes.push('emaSlopeWrong');
+  }
+  if (!rsiPass) {
+    blockedReasons.push(`OB RSI must be between ${rsiMin} and ${rsiMax}.`);
+    rejectionReasonCodes.push('rsiOutOfRange');
+  }
+  if (entry.triggered && (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0)) {
     blockedReasons.push('OB risk levels are invalid.');
   }
 
@@ -2242,6 +2297,10 @@ function buildOrderBlockCandidate(direction, indicators, options, marketRegime, 
     status = finalScore >= config.entryScore ? direction : finalScore >= 4 ? 'WAIT' : 'NO_TRADE';
   } else if (!blockedReasons.length && finalScore >= 4) {
     status = 'WAIT';
+  }
+
+  if (ob.detected && entry.triggered && finalScore < config.entryScore) {
+    rejectionReasonCodes.push('scoreTooLow');
   }
 
   const checks = { obPass: ob.detected, entryPass: entry.triggered, emaPass, rsiPass, rrPass };
@@ -2278,17 +2337,22 @@ function buildOrderBlockCandidate(direction, indicators, options, marketRegime, 
       direction,
       obDetected: ob.detected,
       entryTriggered: entry.triggered,
+      zoneTouched: entry.zoneTouched,
+      priceReturned: entry.priceReturned,
       obTop: round(ob.obTop),
       obBottom: round(ob.obBottom),
       obSize: round(ob.obSize),
       obSizeAtr: round(ob.obSizeAtr),
       obAge: ob.obAge ?? null,
+      atr: round(atr),
       impulseStrength: round(ob.impulseStrength),
       triggerBodyRatio: round(entry.bodyRatio),
       triggerVolumeRatio: round(entry.volumeRatio),
       emaPass,
       rsiPass,
       rrPass,
+      score: finalScore,
+      rejectionReasonCodes: unique(rejectionReasonCodes),
       context: {
         obTop: round(ob.obTop),
         obBottom: round(ob.obBottom),
@@ -2300,6 +2364,243 @@ function buildOrderBlockCandidate(direction, indicators, options, marketRegime, 
         rrTp2: round(levels.rrTp2),
         slAtrMultiple: round(levels.slAtrMultiple),
       },
+    },
+    levels,
+  };
+}
+
+
+function detectCompressionRange(candles, atr, config) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const compressionLookback = Math.max(5, Math.floor(configNumber(config, 'compressionLookback', 20)));
+
+  if (!isFinitePositive(atr) || candleList.length < compressionLookback + 1) {
+    return { valid: false, reason: 'ATR or candle history unavailable for failed breakout compression.', candlesInside: 0 };
+  }
+
+  const rangeCandles = candleList.slice(-(compressionLookback + 1), -1);
+  const highs = rangeCandles.map((candle) => Number(candle?.high)).filter(Number.isFinite);
+  const lows = rangeCandles.map((candle) => Number(candle?.low)).filter(Number.isFinite);
+
+  if (highs.length < compressionLookback || lows.length < compressionLookback) {
+    return { valid: false, reason: 'Compression range has incomplete candles.', candlesInside: 0 };
+  }
+
+  const rangeHigh = Math.max(...highs);
+  const rangeLow = Math.min(...lows);
+  const rangeSize = rangeHigh - rangeLow;
+  const rangeSizeAtr = rangeSize / atr;
+  const maxRangeSizeAtr = configNumber(config, 'maxRangeSizeAtr', 2);
+  const minCandlesInsideRange = Math.max(1, Math.floor(configNumber(config, 'minCandlesInsideRange', 15)));
+  const rangeBuffer = atr * 0.05;
+  const candlesInside = rangeCandles.filter((candle) => Number(candle?.high) <= rangeHigh + rangeBuffer && Number(candle?.low) >= rangeLow - rangeBuffer).length;
+  const valid = Number.isFinite(rangeSizeAtr) && rangeSizeAtr <= maxRangeSizeAtr && candlesInside >= minCandlesInsideRange;
+
+  return {
+    valid,
+    rangeHigh,
+    rangeLow,
+    rangeSize,
+    rangeSizeAtr,
+    candlesInside,
+    lookback: compressionLookback,
+    reason: valid ? 'Compression range detected.' : 'No valid compression range for failed breakout.',
+  };
+}
+
+function detectFailedBreakout(direction, candles, range, config) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const currentIndex = candleList.length - 1;
+  const failureWindowCandles = Math.max(1, Math.floor(configNumber(config, 'failureWindowCandles', 3)));
+  const minBreakoutVolumeRatio = configNumber(config, 'minBreakoutVolumeRatio', 1.2);
+
+  if (currentIndex < failureWindowCandles) {
+    return { detected: false, range: range?.valid ? range : null, reason: 'Candle history unavailable for failed breakout detection.' };
+  }
+
+  const firstBreakoutIndex = Math.max(0, currentIndex - failureWindowCandles);
+  for (let breakoutIndex = firstBreakoutIndex; breakoutIndex < currentIndex; breakoutIndex += 1) {
+    const breakoutRange = detectCompressionRange(candleList.slice(0, breakoutIndex + 1), atrFromRange(range), config);
+    const activeRange = breakoutRange.valid ? breakoutRange : range;
+
+    if (!activeRange?.valid || !Number.isFinite(activeRange.rangeHigh) || !Number.isFinite(activeRange.rangeLow)) {
+      continue;
+    }
+
+    const breakoutCandle = candleList[breakoutIndex];
+    const failureCandle = candleList[currentIndex];
+    const averageVolume = averageVolumeForWindow(candleList.slice(Math.max(0, breakoutIndex - 20), breakoutIndex));
+    const breakoutVolume = Number(breakoutCandle?.volume);
+    const breakoutVolumeRatio = averageVolume > 0 && Number.isFinite(breakoutVolume) ? breakoutVolume / averageVolume : null;
+    const volumePass = Number.isFinite(breakoutVolumeRatio) && breakoutVolumeRatio >= minBreakoutVolumeRatio;
+    const candlesToFailure = currentIndex - breakoutIndex;
+
+    if (direction === 'LONG') {
+      const brokeBelow = Number(breakoutCandle?.close) < activeRange.rangeLow;
+      const reclaimed = Number(failureCandle?.close) >= activeRange.rangeLow;
+      if (brokeBelow && reclaimed && volumePass && candlesToFailure >= 1 && candlesToFailure <= failureWindowCandles) {
+        return {
+          detected: true,
+          range: activeRange,
+          breakoutCandle,
+          failureCandle,
+          breakoutIndex,
+          failureIndex: currentIndex,
+          breakoutExtreme: Number(breakoutCandle?.low),
+          breakoutVolumeRatio,
+          candlesToFailure,
+          reason: 'Failed downside breakout reclaimed range low.',
+        };
+      }
+    } else {
+      const brokeAbove = Number(breakoutCandle?.close) > activeRange.rangeHigh;
+      const rejected = Number(failureCandle?.close) <= activeRange.rangeHigh;
+      if (brokeAbove && rejected && volumePass && candlesToFailure >= 1 && candlesToFailure <= failureWindowCandles) {
+        return {
+          detected: true,
+          range: activeRange,
+          breakoutCandle,
+          failureCandle,
+          breakoutIndex,
+          failureIndex: currentIndex,
+          breakoutExtreme: Number(breakoutCandle?.high),
+          breakoutVolumeRatio,
+          candlesToFailure,
+          reason: 'Failed upside breakout rejected below range high.',
+        };
+      }
+    }
+  }
+
+  return { detected: false, range: range?.valid ? range : null, reason: 'No fresh failed breakout detected.' };
+}
+
+function atrFromRange(range) {
+  return Number.isFinite(range?.atr) && range.atr > 0 ? range.atr : Number(range?.rangeSize) / Number(range?.rangeSizeAtr);
+}
+
+function buildFailedBreakoutRiskLevels(direction, entry, range, breakoutExtreme, atr, config) {
+  const stopBufferAtr = configNumber(config, 'stopBufferAtr', 0.2);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 1.5);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 2.5);
+  const rrMin = configNumber(config, 'rrMin', 1.3);
+
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !Number.isFinite(breakoutExtreme)) {
+    return { entry1: entry, entry2: null, tp1: null, tp2: null, sl: null, risk: null, rrTp1: null, rrTp2: null, rrRatio: null, atr, rrPass: false };
+  }
+
+  const sl = direction === 'LONG' ? breakoutExtreme - atr * stopBufferAtr : breakoutExtreme + atr * stopBufferAtr;
+  const risk = direction === 'LONG' ? entry - sl : sl - entry;
+  const tp1 = direction === 'LONG' ? entry + risk * tp1RTarget : entry - risk * tp1RTarget;
+  const tp2 = direction === 'LONG' ? entry + risk * tp2RTarget : entry - risk * tp2RTarget;
+  const rrTp1 = risk > 0 ? tp1RTarget : null;
+  const rrTp2 = risk > 0 ? tp2RTarget : null;
+
+  return {
+    entry1: entry,
+    entry2: direction === 'LONG' ? range?.rangeLow : range?.rangeHigh,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: risk > 0 ? risk * tp1RTarget : null,
+    rewardTp2: risk > 0 ? risk * tp2RTarget : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+    rrPass: Number.isFinite(rrTp1) && rrTp1 >= rrMin,
+  };
+}
+
+function buildFailedBreakoutCandidate(direction, indicators, options, marketRegime, config) {
+  const { rsi, atr } = indicators;
+  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const currentCandle = indicators.lastCandle ?? candles.at(-1);
+  const entry = Number(currentCandle?.close ?? indicators.price);
+  const range = detectCompressionRange(candles, atr, config);
+  const failure = detectFailedBreakout(direction, candles, range, config);
+  const activeRange = failure.range ?? range;
+  const levels = buildFailedBreakoutRiskLevels(direction, entry, activeRange, failure.breakoutExtreme, atr, config);
+  const rsiMin = configNumber(config, 'rsiMin', 35);
+  const rsiMax = configNumber(config, 'rsiMax', 65);
+  const rsiPass = Number.isFinite(rsi) && rsi >= rsiMin && rsi <= rsiMax;
+  const rrPass = levels.rrPass === true;
+  const compressionQualityPoints = activeRange.candlesInside >= 18 ? 2 : activeRange.candlesInside >= 15 ? 1 : 0;
+  const breakoutVolumePass = Number.isFinite(failure.breakoutVolumeRatio) && failure.breakoutVolumeRatio >= 1.5;
+  const failureSpeedPass = failure.candlesToFailure === 1;
+  const rrAdequatePass = Number.isFinite(levels.rrTp1) && levels.rrTp1 >= 1.8;
+  const items = [
+    scoreItem('compressionQuality', 'Compression quality', compressionQualityPoints, 2, activeRange.valid, `${activeRange.candlesInside ?? 0}/${activeRange.lookback ?? 0} candles inside range.`),
+    scoreItem('breakoutVolume', 'Breakout volume', breakoutVolumePass ? 1 : 0, 1, breakoutVolumePass, `Breakout volume ratio ${Number.isFinite(failure.breakoutVolumeRatio) ? failure.breakoutVolumeRatio.toFixed(2) : '--'}.`),
+    scoreItem('failureSpeed', 'Failure speed', failureSpeedPass ? 1 : 0, 1, failureSpeedPass, Number.isFinite(failure.candlesToFailure) ? `Failed in ${failure.candlesToFailure} candles.` : 'No failure speed.'),
+    scoreItem('rrAdequate', 'Risk/reward adequate', rrAdequatePass ? 1 : 0, 1, rrAdequatePass, `RR TP1 ${Number.isFinite(levels.rrTp1) ? levels.rrTp1.toFixed(2) : '--'}.`),
+  ];
+  const technicalTotal = items.reduce((sum, item) => sum + item.points, 0);
+  const finalScore = Math.min(5, technicalTotal);
+  const blockedReasons = [];
+  const waitReasons = [];
+
+  if (!activeRange.valid) waitReasons.push(activeRange.reason);
+  if (activeRange.valid && !failure.detected) waitReasons.push(failure.reason);
+  if (failure.detected && !rrPass) blockedReasons.push('Failed breakout RR is below minimum or unavailable.');
+  if (failure.detected && !rsiPass) blockedReasons.push(`Failed breakout RSI must be between ${rsiMin} and ${rsiMax}.`);
+  if (failure.detected && (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0)) {
+    blockedReasons.push('Failed breakout risk levels are invalid.');
+  }
+
+  let status = 'NO_TRADE';
+  if (!blockedReasons.length && activeRange.valid && failure.detected) {
+    status = finalScore >= config.entryScore ? direction : finalScore >= 3 ? 'WAIT' : 'NO_TRADE';
+  } else if (!blockedReasons.length && activeRange.valid && finalScore >= 3) {
+    status = 'WAIT';
+  }
+
+  const checks = { compressionPass: activeRange.valid, failurePass: failure.detected, rsiPass, rrPass };
+
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal,
+    adjustmentTotal: 0,
+    rawTotal: technicalTotal,
+    max: 5,
+    items,
+    adjustments: [],
+    breakdown: {
+      compressionQuality: items[0].points,
+      breakoutVolume: items[1].points,
+      failureSpeed: items[2].points,
+      rrAdequate: items[3].points,
+    },
+    hardBlock: blockedReasons[0] ?? null,
+    blockedReasons,
+    rejectionReasons: unique([...blockedReasons, ...waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    waitReasons,
+    warnings: [],
+    entryContext: status === direction ? 'SAFE_ENTRY' : finalScore >= 3 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.SAFE_ENTRY : finalScore >= 3 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment: { points: 0, warning: null },
+    fundingOiAdjustment: { points: 0, warnings: [] },
+    checks,
+    diagnostics: {
+      strategyType: 'failedBreakoutReversion',
+      direction,
+      compressionDetected: activeRange.valid,
+      failedBreakoutDetected: failure.detected,
+      rangeHigh: round(activeRange.rangeHigh),
+      rangeLow: round(activeRange.rangeLow),
+      rangeSize: round(activeRange.rangeSize),
+      rangeSizeAtr: round(activeRange.rangeSizeAtr),
+      candlesInside: activeRange.candlesInside ?? 0,
+      breakoutVolumeRatio: round(failure.breakoutVolumeRatio),
+      candlesToFailure: failure.candlesToFailure ?? null,
+      breakoutExtreme: round(failure.breakoutExtreme),
+      rsiPass,
+      rrPass,
+      score: finalScore,
     },
     levels,
   };
@@ -3282,6 +3583,8 @@ export function buildSignalSetup(indicators, options = {}) {
       ? buildFairValueGapCandidate
       : experimentSignalConfig.strategyType === 'orderBlock'
       ? buildOrderBlockCandidate
+      : experimentSignalConfig.strategyType === 'failedBreakoutReversion'
+      ? buildFailedBreakoutCandidate
       : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
       ? buildLiquiditySweepReclaimCandidate
       : experimentSignalConfig.strategyType === 'trendPullbackContinuation'
@@ -3343,7 +3646,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock'].includes(experimentSignalConfig.strategyType)
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion'].includes(experimentSignalConfig.strategyType)
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,

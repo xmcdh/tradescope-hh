@@ -1086,7 +1086,80 @@ function createDiagnostics() {
       blockedReasonBreakdown: {},
       primaryBlockedReasonBreakdown: {},
     },
+    orderBlock: {
+      rejectionReasons: {
+        obNotDetected: 0,
+        obViolated: 0,
+        obTooOld: 0,
+        obSizeTooSmall: 0,
+        obSizeTooLarge: 0,
+        noImpulseMove: 0,
+        priceNotReturnedToOB: 0,
+        triggerClosedBelowOB: 0,
+        bodyRatioTooLow: 0,
+        volumeTooLow: 0,
+        emaSlopeWrong: 0,
+        rsiOutOfRange: 0,
+        rrFailed: 0,
+        scoreTooLow: 0,
+        atrZeroOrNull: 0,
+      },
+      firstAtrValues: [],
+      detectedSamples: [],
+      returnEventSamples: [],
+    },
   };
+}
+
+function updateOrderBlockDiagnostics(diagnostics, record) {
+  const selected = record.signalDiagnostics?.strategyType === 'orderBlock'
+    ? record.signalDiagnostics.selected
+    : null;
+
+  if (!selected) {
+    return;
+  }
+
+  const orderBlockDiagnostics = diagnostics.orderBlock;
+  const atr = selected.atr;
+  if (Number.isFinite(atr) && orderBlockDiagnostics.firstAtrValues.length < 10) {
+    orderBlockDiagnostics.firstAtrValues.push(atr);
+  }
+
+  const reasonCodes = Array.isArray(selected.rejectionReasonCodes) ? selected.rejectionReasonCodes : [];
+  reasonCodes.forEach((reason) => incrementCounter(orderBlockDiagnostics.rejectionReasons, reason));
+
+  if (selected.obDetected && orderBlockDiagnostics.detectedSamples.length < 20) {
+    orderBlockDiagnostics.detectedSamples.push({
+      timestamp: record.timestamp,
+      direction: selected.direction,
+      obTop: selected.obTop,
+      obBottom: selected.obBottom,
+      obSize: selected.obSize,
+      atr: selected.atr,
+      obSizeAtr: selected.obSizeAtr,
+      obAge: selected.obAge,
+      impulseStrength: selected.impulseStrength,
+    });
+  }
+
+  if (selected.obDetected && selected.zoneTouched && orderBlockDiagnostics.returnEventSamples.length < 20) {
+    orderBlockDiagnostics.returnEventSamples.push({
+      timestamp: record.timestamp,
+      direction: selected.direction,
+      triggered: selected.entryTriggered,
+      failedConditions: reasonCodes,
+      obTop: selected.obTop,
+      obBottom: selected.obBottom,
+      close: selected.entryPrice,
+      triggerBodyRatio: selected.triggerBodyRatio,
+      triggerVolumeRatio: selected.triggerVolumeRatio,
+      emaPass: selected.emaPass,
+      rsiPass: selected.rsiPass,
+      rrPass: selected.rrPass,
+      score: selected.score,
+    });
+  }
 }
 
 function updateV2BreakoutDiagnostics(diagnostics, record) {
@@ -1196,6 +1269,7 @@ function updateDiagnostics(diagnostics, record) {
   }
 
   updateV2BreakoutDiagnostics(diagnostics, record);
+  updateOrderBlockDiagnostics(diagnostics, record);
 }
 
 function recordTradeOutcome(diagnostics, outcome) {

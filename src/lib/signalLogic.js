@@ -3615,7 +3615,7 @@ export function buildSignalSetup(indicators, options = {}) {
   const finalScore = selected.total;
   const blockedReason = unique(selected.blockedReasons ?? []);
   const signalValidity =
-    ['sessionBreakout', 'fairValueGap', 'orderBlock'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
+    ['sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
       ? 'VALID'
       : classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);

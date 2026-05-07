@@ -2575,6 +2575,12 @@ function buildFailedBreakoutCandidate(direction, indicators, options, marketRegi
     status = 'WAIT';
   }
 
+  const allowedDirections = Array.isArray(config.allowedDirections) && config.allowedDirections.length ? config.allowedDirections : ['LONG', 'SHORT'];
+  if (['LONG', 'SHORT'].includes(status) && !allowedDirections.includes(status)) {
+    blockedReasons.push('Direction not in allowedDirections');
+    status = 'NO_TRADE';
+  }
+
   const checks = { compressionPass: activeRange.valid, failurePass: failure.detected, rsiPass, rrPass };
 
   return {

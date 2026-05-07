@@ -472,6 +472,14 @@ Main blocker: in crypto 1h, FVG zones are penetrated rather than respected as re
 
 Decision: close V3-C, proceed to V3-D Order Block.
 
+
+### 2026-05-07 — V3-D Order Block Closed
+
+OB detection: 81%, but OB return rate: 31% (threshold requires >50%).
+Top blocker: EMA50 slope filter (8,279 blocks).
+In choppy crypto 1h, EMA50 rarely has clean slope direction when OB forms.
+Decision: close V3-D, not retesting with looser EMA — core hypothesis unvalidated (return rate too low).
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:

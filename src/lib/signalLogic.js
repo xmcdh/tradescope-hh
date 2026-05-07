@@ -2526,7 +2526,11 @@ function buildFailedBreakoutRiskLevels(direction, entry, range, breakoutExtreme,
 
 function buildFailedBreakoutCandidate(direction, indicators, options, marketRegime, config) {
   const { rsi, atr } = indicators;
-  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const candles = Array.isArray(indicators.extendedCandles)
+    ? indicators.extendedCandles
+    : Array.isArray(indicators.recentCandles)
+    ? indicators.recentCandles
+    : [];
   const currentCandle = indicators.lastCandle ?? candles.at(-1);
   const entry = Number(currentCandle?.close ?? indicators.price);
   const range = detectCompressionRange(candles, atr, config);

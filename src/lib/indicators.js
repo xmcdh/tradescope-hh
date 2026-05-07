@@ -501,6 +501,7 @@ export function calculateIndicators(candles, timeframe = '15m') {
     resistanceStrength: supportLevels.resistanceStrength,
     htfConfluence: supportLevels.htfConfluence,
     recentCandles: candles.slice(-20),
+    extendedCandles: candles.slice(-100),
     latestHigh: highs[highs.length - 1] ?? null,
     latestLow: lows[lows.length - 1] ?? null,
     lastCandle,

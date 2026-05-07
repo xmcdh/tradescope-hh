@@ -934,6 +934,10 @@ export const v3EdgeRedesignExperiments = [
   },
   {
     experimentId: 'v3-failed-breakout-long-only',
+    status: 'closed',
+    closedReason: 'frequency-too-low',
+    closedDate: '2026-05-07',
+    note: 'Edge confirmed ETH-only, ~1.8 trades/month, not viable for live. Multi-pair fails BTC/SOL. Cannot fix without destroying quality.',
     strategyVersion: 'v3-failed-breakout-long-only',
     label: 'Failed SHORT breakout LONG reversion only',
     candidateOnly: true,
@@ -958,6 +962,10 @@ export const v3EdgeRedesignExperiments = [
   },
   {
     experimentId: 'v3-fbr-eth-relaxed',
+    status: 'closed',
+    closedReason: 'frequency-too-low',
+    closedDate: '2026-05-07',
+    note: 'Edge confirmed ETH-only, ~1.8 trades/month, not viable for live. Multi-pair fails BTC/SOL. Cannot fix without destroying quality.',
     strategyVersion: 'v3-failed-breakout-long-only',
     label: 'Failed breakout ETH relaxed compression',
     candidateOnly: true,

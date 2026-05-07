@@ -480,6 +480,25 @@ Top blocker: EMA50 slope filter (8,279 blocks).
 In choppy crypto 1h, EMA50 rarely has clean slope direction when OB forms.
 Decision: close V3-D, not retesting with looser EMA — core hypothesis unvalidated (return rate too low).
 
+
+### 2026-05-07 — v3-E Failed Breakout Reversion
+
+**Status:** CLOSED — frequency too low
+**Date:** 2026-05-07
+
+**What worked:**
+- ETH/USDT 1h: WR 48.68%, Exp 0.46R, MaxDD 5.85% — passes all quality gates
+- Score=4 filter correctly calibrated
+- Compression detection logic sound
+
+**What didn't work:**
+- Trade frequency: ~1.8/month on ETH
+- Not generalizable: BTC WR 27%, SOL WR 18%
+- Cannot increase frequency without destroying quality (tested score=3, relaxed compression — both fail)
+
+**Lesson learned:**
+Failed breakout reversion edge exists in ETH microstructure specifically. Hypothesis is sound but market opportunity too infrequent for live trading viability.
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:

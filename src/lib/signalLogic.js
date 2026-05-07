@@ -3660,6 +3660,10 @@ export function buildSignalSetup(indicators, options = {}) {
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,
+            candidates: {
+              long: longCandidate.diagnostics ?? null,
+              short: shortCandidate.diagnostics ?? null,
+            },
           }
         : null,
     hardBlock: selected.hardBlock,

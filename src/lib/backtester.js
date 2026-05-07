@@ -1086,6 +1086,14 @@ function createDiagnostics() {
       blockedReasonBreakdown: {},
       primaryBlockedReasonBreakdown: {},
     },
+    failedBreakout: {
+      compressionDetectedCount: 0,
+      failedBreakoutDetectedCount: 0,
+      validExecutableLongCount: 0,
+      validExecutableShortCount: 0,
+      compressionRangeSizeAtrTotal: 0,
+      compressionRangeSizeAtrCount: 0,
+    },
     orderBlock: {
       rejectionReasons: {
         obNotDetected: 0,
@@ -1109,6 +1117,44 @@ function createDiagnostics() {
       returnEventSamples: [],
     },
   };
+}
+
+
+function updateFailedBreakoutDiagnostics(diagnostics, record) {
+  const candidateDiagnostics = record.signalDiagnostics?.strategyType === 'failedBreakoutReversion'
+    ? record.signalDiagnostics.candidates
+    : null;
+
+  if (!candidateDiagnostics) {
+    return;
+  }
+
+  const candidates = [candidateDiagnostics.long, candidateDiagnostics.short].filter(Boolean);
+  const compressionDetected = candidates.some((candidate) => candidate.compressionDetected === true);
+  const failedBreakoutDetected = candidates.some((candidate) => candidate.failedBreakoutDetected === true);
+
+  if (compressionDetected) {
+    diagnostics.failedBreakout.compressionDetectedCount += 1;
+    const rangeSizeAtrs = candidates
+      .filter((candidate) => candidate.compressionDetected === true && Number.isFinite(candidate.rangeSizeAtr))
+      .map((candidate) => candidate.rangeSizeAtr);
+
+    if (rangeSizeAtrs.length) {
+      diagnostics.failedBreakout.compressionRangeSizeAtrTotal += rangeSizeAtrs.reduce((sum, value) => sum + value, 0) / rangeSizeAtrs.length;
+      diagnostics.failedBreakout.compressionRangeSizeAtrCount += 1;
+    }
+  }
+
+  if (failedBreakoutDetected) {
+    diagnostics.failedBreakout.failedBreakoutDetectedCount += 1;
+  }
+
+  if (record.actionableEligible && record.signal === 'LONG') {
+    diagnostics.failedBreakout.validExecutableLongCount += 1;
+  }
+  if (record.actionableEligible && record.signal === 'SHORT') {
+    diagnostics.failedBreakout.validExecutableShortCount += 1;
+  }
 }
 
 function updateOrderBlockDiagnostics(diagnostics, record) {
@@ -1269,6 +1315,7 @@ function updateDiagnostics(diagnostics, record) {
   }
 
   updateV2BreakoutDiagnostics(diagnostics, record);
+  updateFailedBreakoutDiagnostics(diagnostics, record);
   updateOrderBlockDiagnostics(diagnostics, record);
 }
 

@@ -2239,7 +2239,11 @@ function emaSlopeAligned(direction, indicators) {
 function buildOrderBlockCandidate(direction, indicators, options, marketRegime, config) {
   const { symbol, btcContext } = options;
   const { rsi, atr } = indicators;
-  const candles = Array.isArray(indicators.recentCandles) ? indicators.recentCandles : [];
+  const candles = Array.isArray(indicators.extendedCandles)
+    ? indicators.extendedCandles
+    : Array.isArray(indicators.recentCandles)
+    ? indicators.recentCandles
+    : [];
   const currentCandle = indicators.lastCandle ?? candles.at(-1);
   const ob = detectOrderBlock(direction, candles, atr, config);
   const entry = obEntryTriggered(direction, currentCandle, ob, indicators, config);

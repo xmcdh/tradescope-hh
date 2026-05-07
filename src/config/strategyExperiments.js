@@ -990,6 +990,10 @@ export const v3EdgeRedesignExperiments = [
   },
   {
     experimentId: 'v4b-mean-reversion-squeeze',
+    status: 'closed',
+    closedReason: 'no-edge',
+    closedDate: '2026-05-07',
+    note: 'WR peaked at 37.84% after two variants. Post-squeeze crypto price action is continuation-dominant, not mean-reverting. Hypothesis rejected.',
     strategyVersion: 'v4b-mean-reversion-squeeze',
     label: 'Mean reversion squeeze two-candle confirmation',
     candidateOnly: true,
@@ -1020,6 +1024,10 @@ export const v3EdgeRedesignExperiments = [
   },
   {
     experimentId: 'v4-mean-reversion-squeeze',
+    status: 'closed',
+    closedReason: 'no-edge',
+    closedDate: '2026-05-07',
+    note: 'WR peaked at 37.84% after two variants. Post-squeeze crypto price action is continuation-dominant, not mean-reverting. Hypothesis rejected.',
     strategyVersion: 'v4-mean-reversion-squeeze',
     label: 'Mean reversion after volatility squeeze',
     candidateOnly: true,

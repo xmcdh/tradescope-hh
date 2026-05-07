@@ -499,6 +499,24 @@ Decision: close V3-D, not retesting with looser EMA — core hypothesis unvalida
 **Lesson learned:**
 Failed breakout reversion edge exists in ETH microstructure specifically. Hypothesis is sound but market opportunity too infrequent for live trading viability.
 
+### 2026-05-07 — v4 Mean Reversion Squeeze
+
+## v4 Mean Reversion Squeeze
+**Status:** CLOSED — no edge
+**Date:** 2026-05-07
+
+**What was tested:**
+- v4 original: score=3, volume filter, single candle confirmation
+- v4b: score=2, no volume filter, two-candle confirmation
+
+**Result:**
+- Best WR: 37.84% (ETH v4b)
+- Expectancy never positive
+- Post-squeeze crypto = continuation, not reversion
+
+**Lesson:**
+Raw 97% reversion rate in pre-audit was artifact of loose definition. Crypto post-squeeze behavior is momentum-driven, not mean-reverting.
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:

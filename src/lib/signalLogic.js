@@ -2630,6 +2630,267 @@ function buildFailedBreakoutCandidate(direction, indicators, options, marketRegi
   };
 }
 
+
+function trueRangeForCandle(candle, previousCandle) {
+  if (!candle) return null;
+  const high = Number(candle.high);
+  const low = Number(candle.low);
+  const previousClose = Number(previousCandle?.close);
+  if (!Number.isFinite(high) || !Number.isFinite(low)) return null;
+  if (!Number.isFinite(previousClose)) return high - low;
+  return Math.max(high - low, Math.abs(high - previousClose), Math.abs(low - previousClose));
+}
+
+function movingAverageAt(values, endIndex, period) {
+  if (endIndex < period - 1) return null;
+  let sum = 0;
+  for (let index = endIndex - period + 1; index <= endIndex; index += 1) {
+    if (!Number.isFinite(values[index])) return null;
+    sum += values[index];
+  }
+  return sum / period;
+}
+
+function buildAtrSeries(candles, period) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const trueRanges = candleList.map((candle, index) => trueRangeForCandle(candle, candleList[index - 1]));
+  return trueRanges.map((_, index) => movingAverageAt(trueRanges, index, period));
+}
+
+function detectMeanReversionSqueeze(direction, candles, config) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const currentIndex = candleList.length - 1;
+  const atrPeriod = Math.max(1, Math.floor(configNumber(config, 'atrPeriod', 14)));
+  const atrMaPeriod = Math.max(1, Math.floor(configNumber(config, 'atrMaPeriod', 20)));
+  const squeezeThreshold = configNumber(config, 'squeezeThreshold', 0.75);
+  const squeezeMinCandles = Math.max(1, Math.floor(configNumber(config, 'squeezeMinCandles', 8)));
+  const initialMoveCandles = Math.max(1, Math.floor(configNumber(config, 'initialMoveCandles', 3)));
+  const initialMoveAtr = configNumber(config, 'initialMoveAtr', 0.75);
+  const minHistory = atrPeriod + atrMaPeriod + squeezeMinCandles + initialMoveCandles + 3;
+
+  if (candleList.length < minHistory) {
+    return { detected: false, reason: 'Insufficient candle history for squeeze detection.' };
+  }
+
+  const atrSeries = buildAtrSeries(candleList, atrPeriod);
+  const atrMaSeries = atrSeries.map((_, index) => movingAverageAt(atrSeries, index, atrMaPeriod));
+  const currentAtr = atrSeries[currentIndex];
+  const currentAtrMa = atrMaSeries[currentIndex];
+  const currentThreshold = currentAtrMa * squeezeThreshold;
+
+  if (!Number.isFinite(currentAtr) || !Number.isFinite(currentThreshold) || currentAtr < currentThreshold) {
+    return { detected: false, reason: 'Squeeze has not exited on current candle.', currentAtr, currentAtrMa };
+  }
+
+  let squeezeEndIndex = null;
+  for (let index = currentIndex - 1; index >= 0; index -= 1) {
+    const threshold = atrMaSeries[index] * squeezeThreshold;
+    if (Number.isFinite(atrSeries[index]) && Number.isFinite(threshold) && atrSeries[index] < threshold) {
+      squeezeEndIndex = index;
+      break;
+    }
+    if (currentIndex - index > initialMoveCandles + 2) break;
+  }
+
+  if (!Number.isInteger(squeezeEndIndex)) {
+    return { detected: false, reason: 'No fresh squeeze exit found.', currentAtr, currentAtrMa };
+  }
+
+  let squeezeStartIndex = squeezeEndIndex;
+  while (squeezeStartIndex > 0) {
+    const previousIndex = squeezeStartIndex - 1;
+    const threshold = atrMaSeries[previousIndex] * squeezeThreshold;
+    if (!(Number.isFinite(atrSeries[previousIndex]) && Number.isFinite(threshold) && atrSeries[previousIndex] < threshold)) break;
+    squeezeStartIndex = previousIndex;
+  }
+  const squeezeDuration = squeezeEndIndex - squeezeStartIndex + 1;
+  if (squeezeDuration < squeezeMinCandles) {
+    return { detected: false, reason: 'Squeeze duration below minimum.', squeezeDuration, currentAtr, currentAtrMa };
+  }
+
+  const moveCandles = candleList.slice(Math.max(0, currentIndex - initialMoveCandles + 1), currentIndex + 1);
+  if (moveCandles.length < initialMoveCandles) {
+    return { detected: false, reason: 'Initial move window unavailable.', squeezeDuration, currentAtr, currentAtrMa };
+  }
+  const moveHigh = Math.max(...moveCandles.map((candle) => Number(candle.high)).filter(Number.isFinite));
+  const moveLow = Math.min(...moveCandles.map((candle) => Number(candle.low)).filter(Number.isFinite));
+  const moveMidpoint = (moveHigh + moveLow) / 2;
+  const firstClose = Number(moveCandles[0]?.close);
+  const currentClose = Number(candleList[currentIndex]?.close);
+  const upwardMove = moveHigh - firstClose;
+  const downwardMove = firstClose - moveLow;
+  const moveDirection = upwardMove >= downwardMove ? 'UP' : 'DOWN';
+  const moveMagnitude = Math.max(upwardMove, downwardMove);
+  const movePass = Number.isFinite(moveMagnitude) && moveMagnitude > currentAtr * initialMoveAtr;
+  const expectedDirection = moveDirection === 'DOWN' ? 'LONG' : 'SHORT';
+  const confirmationPass = direction === 'LONG'
+    ? moveDirection === 'DOWN' && currentClose > moveMidpoint
+    : moveDirection === 'UP' && currentClose < moveMidpoint;
+
+  if (!movePass || direction !== expectedDirection || !confirmationPass) {
+    return {
+      detected: false,
+      squeezeDetected: true,
+      squeezeExit: true,
+      initialMoveDetected: movePass,
+      momentumFailure: confirmationPass,
+      reason: 'Initial move or momentum failure did not match direction.',
+      squeezeDuration,
+      currentAtr,
+      currentAtrMa,
+      moveDirection,
+      moveMagnitude,
+      moveMagnitudeAtr: Number.isFinite(currentAtr) && currentAtr > 0 ? moveMagnitude / currentAtr : null,
+      moveHigh,
+      moveLow,
+      moveMidpoint,
+    };
+  }
+
+  return {
+    detected: true,
+    squeezeDetected: true,
+    squeezeExit: true,
+    initialMoveDetected: true,
+    momentumFailure: true,
+    squeezeDuration,
+    currentAtr,
+    currentAtrMa,
+    moveDirection,
+    moveMagnitude,
+    moveMagnitudeAtr: moveMagnitude / currentAtr,
+    moveHigh,
+    moveLow,
+    moveMidpoint,
+    reason: `${direction} mean reversion squeeze setup detected.`,
+  };
+}
+
+function buildMeanReversionSqueezeRiskLevels(direction, entry, squeeze, atr, config) {
+  const stopBufferAtr = configNumber(config, 'stopBufferAtr', 0.2);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 1.5);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 2.5);
+  const rrMin = configNumber(config, 'rrMin', 1.5);
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !Number.isFinite(squeeze?.moveHigh) || !Number.isFinite(squeeze?.moveLow)) {
+    return { entry1: entry, entry2: null, tp1: null, tp2: null, sl: null, risk: null, rrTp1: null, rrTp2: null, rrRatio: null, atr, rrPass: false };
+  }
+  const sl = direction === 'LONG' ? squeeze.moveLow - atr * stopBufferAtr : squeeze.moveHigh + atr * stopBufferAtr;
+  const risk = direction === 'LONG' ? entry - sl : sl - entry;
+  const tp1 = direction === 'LONG' ? entry + risk * tp1RTarget : entry - risk * tp1RTarget;
+  const tp2 = direction === 'LONG' ? entry + risk * tp2RTarget : entry - risk * tp2RTarget;
+  const rrTp1 = risk > 0 ? tp1RTarget : null;
+  const rrTp2 = risk > 0 ? tp2RTarget : null;
+  return {
+    entry1: entry,
+    entry2: squeeze.moveMidpoint,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: risk > 0 ? risk * tp1RTarget : null,
+    rewardTp2: risk > 0 ? risk * tp2RTarget : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+    rrPass: Number.isFinite(rrTp1) && rrTp1 >= rrMin,
+  };
+}
+
+function buildMeanReversionSqueezeCandidate(direction, indicators, options, marketRegime, config) {
+  const { rsi, atr, currentVolume, averageVolume } = indicators;
+  const candles = Array.isArray(indicators.extendedCandles)
+    ? indicators.extendedCandles
+    : Array.isArray(indicators.recentCandles)
+    ? indicators.recentCandles
+    : [];
+  const currentCandle = indicators.lastCandle ?? candles.at(-1);
+  const entry = Number(currentCandle?.close ?? indicators.price);
+  const squeeze = detectMeanReversionSqueeze(direction, candles, config);
+  const levels = buildMeanReversionSqueezeRiskLevels(direction, entry, squeeze, atr, config);
+  const rsiMin = configNumber(config, 'rsiMin', 30);
+  const rsiMax = configNumber(config, 'rsiMax', 70);
+  const rsiPass = Number.isFinite(rsi) && rsi >= rsiMin && rsi <= rsiMax;
+  const volumeMinRatio = configNumber(config, 'volumeMinRatio', 0.8);
+  const volumeRatio = Number.isFinite(currentVolume) && Number.isFinite(averageVolume) && averageVolume > 0 ? currentVolume / averageVolume : null;
+  const volumePass = Number.isFinite(volumeRatio) && volumeRatio > volumeMinRatio;
+  const rrPass = levels.rrPass === true;
+  const range = candleRange(currentCandle);
+  const body = candleBody(currentCandle);
+  const bodyRatio = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
+  const initialVolume = averageVolumeForWindow(candles.slice(-configNumber(config, 'initialMoveCandles', 3)));
+  const initialVolumeRatio = Number.isFinite(initialVolume) && Number.isFinite(averageVolume) && averageVolume > 0 ? initialVolume / averageVolume : null;
+  const recentCandles = candles.slice(-configNumber(config, 'initialMoveCandles', 3));
+  const priceExtremePass = direction === 'LONG'
+    ? Number(currentCandle?.low) <= Math.min(...recentCandles.map((candle) => Number(candle.low)).filter(Number.isFinite))
+    : Number(currentCandle?.high) >= Math.max(...recentCandles.map((candle) => Number(candle.high)).filter(Number.isFinite));
+  const rsiDivergencePass = squeeze.detected && priceExtremePass && Number.isFinite(rsi) && rsi >= rsiMin && rsi <= rsiMax;
+  const weakExpansionPass = Number.isFinite(initialVolumeRatio) && initialVolumeRatio < 1.2;
+  const longSqueezePass = (squeeze.squeezeDuration ?? 0) >= 12;
+  const strongBodyPass = Number.isFinite(bodyRatio) && bodyRatio > 0.6;
+  const items = [
+    scoreItem('rsiDivergence', 'RSI divergence from price extreme', rsiDivergencePass ? 1 : 0, 1, rsiDivergencePass, Number.isFinite(rsi) ? `RSI ${rsi.toFixed(1)}.` : 'RSI unavailable.'),
+    scoreItem('weakExpansionVolume', 'Weak expansion volume', weakExpansionPass ? 1 : 0, 1, weakExpansionPass, `Initial move volume ratio ${Number.isFinite(initialVolumeRatio) ? initialVolumeRatio.toFixed(2) : '--'}.`),
+    scoreItem('squeezeDuration', 'Squeeze duration', longSqueezePass ? 1 : 0, 1, longSqueezePass, `Squeeze duration ${squeeze.squeezeDuration ?? 0} candles.`),
+    scoreItem('confirmationBody', 'Confirmation body strength', strongBodyPass ? 1 : 0, 1, strongBodyPass, `Body ratio ${Number.isFinite(bodyRatio) ? bodyRatio.toFixed(2) : '--'}.`),
+  ];
+  const finalScore = items.reduce((sum, item) => sum + item.points, 0);
+  const blockedReasons = [];
+  const waitReasons = [];
+  if (!squeeze.detected) waitReasons.push(squeeze.reason);
+  if (squeeze.detected && !rsiPass) blockedReasons.push(`Squeeze RSI must be between ${rsiMin} and ${rsiMax}.`);
+  if (squeeze.detected && !volumePass) blockedReasons.push('Squeeze confirmation volume below minimum.');
+  if (squeeze.detected && !rrPass) blockedReasons.push('Squeeze RR is below minimum or unavailable.');
+  if (squeeze.detected && (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0)) blockedReasons.push('Squeeze risk levels are invalid.');
+  let status = 'NO_TRADE';
+  if (!blockedReasons.length && squeeze.detected) status = finalScore >= config.entryScore ? direction : finalScore >= 2 ? 'WAIT' : 'NO_TRADE';
+  const checks = { squeezePass: squeeze.detected, rsiPass, volumePass, rrPass, levelPass: squeeze.detected, macdPass: true };
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal: finalScore,
+    adjustmentTotal: 0,
+    rawTotal: finalScore,
+    max: 4,
+    items,
+    adjustments: [],
+    breakdown: {
+      rsiDivergence: items[0].points,
+      weakExpansionVolume: items[1].points,
+      squeezeDuration: items[2].points,
+      confirmationBody: items[3].points,
+    },
+    hardBlock: blockedReasons[0] ?? null,
+    blockedReasons,
+    rejectionReasons: unique([...blockedReasons, ...waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    waitReasons,
+    warnings: [],
+    entryContext: status === direction ? 'SAFE_ENTRY' : finalScore >= 2 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.SAFE_ENTRY : finalScore >= 2 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment: { points: 0, warning: null },
+    fundingOiAdjustment: { points: 0, warnings: [] },
+    checks,
+    diagnostics: {
+      strategyType: 'meanReversionSqueeze',
+      direction,
+      squeezeDetected: squeeze.squeezeDetected === true,
+      squeezeExit: squeeze.squeezeExit === true,
+      initialMoveDetected: squeeze.initialMoveDetected === true,
+      momentumFailure: squeeze.momentumFailure === true,
+      squeezeDuration: squeeze.squeezeDuration ?? null,
+      moveDirection: squeeze.moveDirection ?? null,
+      moveMagnitudeAtr: round(squeeze.moveMagnitudeAtr),
+      rsiPass,
+      volumePass,
+      rrPass,
+      score: finalScore,
+    },
+    levels,
+  };
+}
+
 function buildLiquiditySweepReclaimCandidate(direction, indicators, options, marketRegime, config) {
   const { symbol, btcContext } = options;
   const { price, ema20, ema50, ema200, rsi, atr } = indicators;
@@ -3607,6 +3868,8 @@ export function buildSignalSetup(indicators, options = {}) {
       ? buildFairValueGapCandidate
       : experimentSignalConfig.strategyType === 'orderBlock'
       ? buildOrderBlockCandidate
+      : experimentSignalConfig.strategyType === 'meanReversionSqueeze'
+      ? buildMeanReversionSqueezeCandidate
       : experimentSignalConfig.strategyType === 'failedBreakoutReversion'
       ? buildFailedBreakoutCandidate
       : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
@@ -3621,7 +3884,7 @@ export function buildSignalSetup(indicators, options = {}) {
   const finalScore = selected.total;
   const blockedReason = unique(selected.blockedReasons ?? []);
   const signalValidity =
-    ['sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
+    ['sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
       ? 'VALID'
       : classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
@@ -3670,7 +3933,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion'].includes(experimentSignalConfig.strategyType)
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze'].includes(experimentSignalConfig.strategyType)
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,

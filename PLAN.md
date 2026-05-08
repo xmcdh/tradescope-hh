@@ -536,6 +536,40 @@ Raw 97% reversion rate in pre-audit was artifact of loose definition. Crypto pos
 **Lesson:**
 RSI divergence works better as a filter than a primary signal in crypto. Altcoins (ETH, SOL) show false divergence frequently due to BTC correlation — divergence is ETH-local but trend is BTC-driven.
 
+### 2026-05-07 — v5b RSI Divergence BTC Exit Adjustment
+
+**Status:** CLOSED — no improvement
+**Date:** 2026-05-07
+
+**What was tested:**
+- TP2 raised from 2.5R to 3.5R
+- tp1SizeRatio changed from 0.6 to 0.4
+- BTC/USDT only (SOL/ETH confirmed no edge)
+
+**Result:**
+- Identical to v5 original: 43 trades, WR 48.84%, Exp 0.2209R, MaxDD 4.00R
+- Zero change despite parameter difference
+
+**Technical debt identified:**
+Exit sizing (tp1SizeRatio) may not be correctly implemented in backtest engine. Results were identical to 4 decimal places despite different TP2 and size ratio. Worth auditing before next strategy relies on partial exit sizing.
+
+### 2026-05-07 — V6 Trend Pullback Entry
+
+**Status:** PRE-AUDIT IN PROGRESS
+**Date:** 2026-05-07
+
+**Hypothesis:**
+In an established trend (EMA21 > EMA55 > EMA200 for uptrend, inverse for downtrend), enter on first pullback that stalls at EMA21. Ride continuation of existing trend.
+
+**Why different from v2-v5:**
+All previous hypotheses were reversal or compression-based. Crypto has strong trending periods that were being fought against. Pullback entry rides the trend, does not predict reversals.
+
+**Pre-audit targets:**
+- Pullbacks/month >= 10 per pair
+- Stall rate >= 50%
+
+**Status:** Audit running, result pending.
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:
@@ -563,3 +597,10 @@ These rules apply to all future research:
    Report at -0.02R, -0.05R, -0.10R
 
 6. No automatic approval from longer history alone
+
+
+7. Pre-implementation audit required before any new signal logic is coded:
+   - Confirm raw frequency >= target
+   - Confirm base rate (reversal/stall rate) >= threshold
+   - If audit fails, do not implement
+   This was established after v4 showed 97% raw reversion rate that collapsed to 37% WR once proper entry logic was applied.

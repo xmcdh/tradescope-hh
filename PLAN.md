@@ -610,6 +610,75 @@ What we have learned:
 - BTC shows partial signals (v5 WR 49%) but payoff structure is insufficient
 - Reversal, compression, and trend strategies all tested and failed
 
+## Strategic Pivot — ETH Conviction Portfolio
+
+The research from v2-v7 shows that forcing daily signal frequency destroys edge. The project should pivot from a daily signal dashboard to a high-conviction selective system.
+
+### Old vs New Framing
+
+| Old Framing | New Framing |
+|---|---|
+| Daily signal dashboard | High-conviction selective system |
+| Something to trade every day | NO_TRADE is the normal/default state |
+| Chase frequency | Preserve quality |
+| Many small setups | Few high-quality dislocations |
+| Loosen filters to get trades | Keep filters strict |
+
+### Practical Implications
+
+| Area | Implication |
+|---|---|
+| UX dashboard | NO_TRADE should be treated as a healthy state, not failure |
+| Research gates | Frequency gate must differ for conviction systems |
+| Position sizing | Fewer trades may justify larger sizing, but risk must remain capped |
+| Evaluation | Focus on expectancy, drawdown, losing streak, and monthly opportunity |
+| Strategy design | Combine rare high-quality edges instead of loosening one edge |
+
+### New Project Objective
+
+Build an ETH-focused conviction engine that only trades rare, high-quality dislocations.
+
+### Initial Candidate Edges
+
+| Edge | Status | Role |
+|---|---|---|
+| v3-E failed breakout long-only ETH | Quality positive, frequency low | Price-action dislocation |
+| v7 funding extreme ETH | Best quality observed, frequency low | Positioning/crowding dislocation |
+
+### Portfolio Thesis
+
+The combined system may be more robust because it uses two different sources of edge:
+1. Structural trap edge — failed breakout.
+2. Positioning pressure edge — funding extreme.
+
+The goal is not to force one strategy to trade more often. The goal is to combine independent rare-event edges while preserving quality.
+
+### Revised Conviction-System Gates
+
+| Old Gate | Conviction-System Interpretation |
+|---|---|
+| Min 100 trades before OOS | Ideal, but may be unrealistic for rare-event edge |
+| High frequency | Minimum viable monthly opportunity |
+| Pair-generalizable | Pair-specific is acceptable if edge is strong and documented |
+| Standalone strategy | Portfolio of rare edges is acceptable |
+
+### Next Required Audit
+
+Audit combined ETH conviction portfolio:
+- v3-failed-breakout-long-only
+- v7-funding-rate-extreme
+
+Questions to answer:
+| Question | Why |
+|---|---|
+| Combined trades/month | Check if 2-4/month is realistic |
+| Combined expectancy > 0.3R? | Quality must remain intact |
+| Combined max drawdown | Larger sizing requires low DD |
+| Signal overlap | Ensure frequency actually improves |
+| Losing month concentration | Detect regime dependency |
+
+Do not open V8 until this combined ETH portfolio audit is complete.
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:

@@ -8,7 +8,7 @@ import {
 import { fetchBybitKlines, fetchBybitTicker } from './bybitProxy.js';
 
 const VALID_PROVIDERS = new Set(['binance', 'bybit']);
-const VALID_TYPES = new Set(['klines', 'ticker', 'funding', 'openinterest']);
+const VALID_TYPES = new Set(['klines', 'ticker', 'funding', 'fundinghistory', 'openinterest']);
 
 export function normalizeMarketDataQuery(query = {}) {
   return {
@@ -47,7 +47,7 @@ export function validateMarketDataQuery(query) {
         endpoint: query.type || 'unknown',
         symbol: query.symbol || null,
         errorType: ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-        message: 'Invalid type. Use klines, ticker, funding, or openinterest.',
+        message: 'Invalid type. Use klines, ticker, funding, fundingHistory, or openinterest.',
         upstream: null,
       }),
     };
@@ -167,6 +167,19 @@ export async function handleMarketDataRequest(rawQuery, fetcher = fetch) {
 
   if (query.type === 'ticker') {
     return fetchBinanceEndpoint('ticker/price', { symbol: query.symbol }, fetcher);
+  }
+
+  if (query.type === 'fundinghistory') {
+    return fetchBinanceEndpoint(
+      'fundingRate',
+      {
+        symbol: query.symbol,
+        limit: String(Math.min(1000, Math.max(1, Number(query.limit) || 1000))),
+        ...(query.startTime ? { startTime: query.startTime } : {}),
+        ...(query.endTime ? { endTime: query.endTime } : {}),
+      },
+      fetcher,
+    );
   }
 
   const result =

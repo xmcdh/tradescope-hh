@@ -1,4 +1,4 @@
-export const ALLOWED_BINANCE_ENDPOINTS = new Set(['klines', 'ticker/24hr', 'ticker/price', 'premiumIndex', 'openInterest']);
+export const ALLOWED_BINANCE_ENDPOINTS = new Set(['klines', 'ticker/24hr', 'ticker/price', 'premiumIndex', 'openInterest', 'fundingRate']);
 export const ERROR_TYPES = {
   NETWORK_BLOCKED: 'NETWORK_BLOCKED',
   TLS_ERROR: 'TLS_ERROR',

@@ -570,6 +570,26 @@ Enter on EMA21 pullback in established trend (EMA21 > EMA55 > EMA200).
 **Lesson:**
 EMA21 pullback in crypto 1h does not produce reliable recovery signals. Price returns to EMA21 frequently but recovery candles are mostly weak and choppy — not tradeable with confidence. Pre-audit process correctly prevented wasted implementation effort.
 
+### 2026-05-08 — V7 Funding Rate Extreme Reversal
+
+**Status:** CLOSED — frequency too low
+**Date:** 2026-05-08
+
+**What worked:**
+- New funding-rate data source added via Vercel proxy fundingHistory route
+- ETH/USDT original v7 quality was the best observed: 25 trades, WR 52.00%, Exp 0.53R, MaxDD 5.00R
+- Funding extreme + trend filter + confirmation creates real signal quality
+
+**What didn't work:**
+- Frequency too low: ~0.6 ETH trades/month over 2023-01-01 to 2026-04-30
+- BTC: 16 trades, WR 43.75%, Exp -0.0068R
+- SOL: 40 trades, WR 37.50%, Exp -0.0813R, MaxDD 20.75R
+- v7b relaxation raised ETH to 144 trades but destroyed quality: WR 42.36%, Exp 0.0851R, MaxDD 40.00R
+- v7c lower funding threshold produced 39 ETH trades but diluted edge: WR 43.59%, Exp 0.2115R
+
+**Lesson:**
+Funding-rate extreme is a genuine crypto-specific edge source, but only at strict confirmation quality. Increasing frequency by lowering score or funding thresholds dilutes the edge below gate. Funding extreme with full confirmation is a rare event, not viable as standalone live strategy at 1h.
+
 ## Research Summary
 
 | Version | Hypothesis | Closed Reason |

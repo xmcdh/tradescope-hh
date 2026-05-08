@@ -2905,6 +2905,26 @@ function buildMeanReversionSqueezeCandidate(direction, indicators, options, mark
 }
 
 
+
+function buildEmaSeries(candles, period) {
+  const candleList = Array.isArray(candles) ? candles : [];
+  const values = Array(candleList.length).fill(null);
+  if (!period || candleList.length < period) return values;
+  const multiplier = 2 / (period + 1);
+  let sum = 0;
+  for (let index = 0; index < candleList.length; index += 1) {
+    const close = Number(candleList[index]?.close);
+    if (!Number.isFinite(close)) continue;
+    if (index < period) {
+      sum += close;
+      if (index === period - 1) values[index] = sum / period;
+    } else if (Number.isFinite(values[index - 1])) {
+      values[index] = close * multiplier + values[index - 1] * (1 - multiplier);
+    }
+  }
+  return values;
+}
+
 function buildRsiSeries(candles, period) {
   const candleList = Array.isArray(candles) ? candles : [];
   const values = Array(candleList.length).fill(null);
@@ -3195,6 +3215,170 @@ function buildRsiDivergenceCandidate(direction, indicators, options, marketRegim
       rsiDiff: round(divergence.rsiDiff),
       adx: round(divergence.adx),
       candlesToConfirmation: divergence.candlesToConfirmation ?? null,
+    },
+    levels,
+  };
+}
+
+
+function getFundingCacheRecords(symbol) {
+  const records = globalThis.__TRADESCOPE_FUNDING_CACHE__?.[String(symbol ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase()];
+  return Array.isArray(records) ? records : [];
+}
+
+function fundingRecordForTimestamp(symbol, timestamp, config) {
+  const records = getFundingCacheRecords(symbol);
+  const currentTime = Number(timestamp);
+  const windowMs = Math.max(1, Math.floor(configNumber(config, 'confirmationWindowCandles', 6))) * 60 * 60 * 1000;
+  if (!records.length || !Number.isFinite(currentTime)) {
+    return null;
+  }
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const recordTime = Number(records[index]?.time ?? records[index]?.fundingTime);
+    if (!Number.isFinite(recordTime)) continue;
+    if (recordTime > currentTime) continue;
+    if (currentTime - recordTime > windowMs) break;
+    return { ...records[index], time: recordTime, fundingRate: Number(records[index]?.fundingRate), ageCandles: Math.round((currentTime - recordTime) / (60 * 60 * 1000)) };
+  }
+  return null;
+}
+
+function buildFundingRateExtremeRiskLevels(direction, entry, candle, atr, config) {
+  const stopAtrMultiple = configNumber(config, 'stopAtrMultiple', 1.5);
+  const tp1RTarget = configNumber(config, 'tp1RTarget', 1.5);
+  const tp2RTarget = configNumber(config, 'tp2RTarget', 3);
+  const rrMin = configNumber(config, 'rrMin', 1.5);
+  if (!isFinitePositive(entry) || !isFinitePositive(atr) || !candle) {
+    return { entry1: entry, entry2: null, tp1: null, tp2: null, sl: null, risk: null, rrTp1: null, rrTp2: null, rrRatio: null, atr, rrPass: false };
+  }
+  const sl = direction === 'LONG'
+    ? Number(candle.low) - atr * stopAtrMultiple
+    : Number(candle.high) + atr * stopAtrMultiple;
+  const risk = direction === 'LONG' ? entry - sl : sl - entry;
+  const tp1 = direction === 'LONG' ? entry + risk * tp1RTarget : entry - risk * tp1RTarget;
+  const tp2 = direction === 'LONG' ? entry + risk * tp2RTarget : entry - risk * tp2RTarget;
+  const rrTp1 = risk > 0 ? tp1RTarget : null;
+  const rrTp2 = risk > 0 ? tp2RTarget : null;
+  return {
+    entry1: entry,
+    entry2: null,
+    tp1,
+    tp2,
+    sl,
+    risk,
+    rewardTp1: risk > 0 ? risk * tp1RTarget : null,
+    rewardTp2: risk > 0 ? risk * tp2RTarget : null,
+    rrTp1,
+    rrTp2,
+    rrRatio: rrTp1,
+    slAtrMultiple: risk > 0 ? risk / atr : null,
+    atr,
+    rrPass: Number.isFinite(rrTp1) && rrTp1 >= rrMin,
+  };
+}
+
+function buildFundingRateExtremeCandidate(direction, indicators, options, marketRegime, config) {
+  const { symbol } = options;
+  const candles = Array.isArray(indicators.extendedCandles)
+    ? indicators.extendedCandles
+    : Array.isArray(indicators.recentCandles)
+    ? indicators.recentCandles
+    : [];
+  const currentCandle = indicators.lastCandle ?? candles.at(-1);
+  const entry = Number(currentCandle?.close ?? indicators.price);
+  const funding = fundingRecordForTimestamp(symbol, indicators.currentTimestamp, config);
+  const positiveThreshold = configNumber(config, 'fundingPositiveThreshold', 0.0001);
+  const negativeThreshold = configNumber(config, 'fundingNegativeThreshold', -0.0001);
+  const fundingRate = Number(funding?.fundingRate);
+  const fundingDirection = Number.isFinite(fundingRate)
+    ? fundingRate > positiveThreshold
+      ? 'SHORT'
+      : fundingRate < negativeThreshold
+        ? 'LONG'
+        : null
+    : null;
+  const fundingExtreme = fundingDirection === direction;
+  const range = candleRange(currentCandle);
+  const body = candleBody(currentCandle);
+  const bodyRatio = Number.isFinite(body) && Number.isFinite(range) && range > 0 ? body / range : null;
+  const minBodyRatio = configNumber(config, 'confirmBodyRatio', 0.4);
+  const confirmationPass = direction === 'LONG'
+    ? Number(currentCandle?.close) > Number(currentCandle?.open) && Number.isFinite(bodyRatio) && bodyRatio >= minBodyRatio
+    : Number(currentCandle?.close) < Number(currentCandle?.open) && Number.isFinite(bodyRatio) && bodyRatio >= minBodyRatio;
+  const ema21Series = buildEmaSeries(candles, Math.max(1, Math.floor(configNumber(config, 'ema21Period', 21))));
+  const ema55Series = buildEmaSeries(candles, Math.max(1, Math.floor(configNumber(config, 'ema55Period', 55))));
+  const ema200Series = buildEmaSeries(candles, Math.max(1, Math.floor(configNumber(config, 'ema200Period', 200))));
+  const ema21 = ema21Series.at(-1);
+  const ema55 = ema55Series.at(-1);
+  const ema200 = ema200Series.at(-1);
+  const price = entry;
+  const trendPass = direction === 'SHORT'
+    ? (Number.isFinite(price) && Number.isFinite(ema200) && price < ema200) || (Number.isFinite(ema21) && Number.isFinite(ema55) && ema21 < ema55)
+    : (Number.isFinite(price) && Number.isFinite(ema200) && price > ema200) || (Number.isFinite(ema21) && Number.isFinite(ema55) && ema21 > ema55);
+  const atrSeries = buildAtrSeries(candles, Math.max(1, Math.floor(configNumber(config, 'atrPeriod', 14))));
+  const atr = atrSeries.at(-1) ?? indicators.atr;
+  const levels = buildFundingRateExtremeRiskLevels(direction, entry, currentCandle, atr, config);
+  const rrPass = levels.rrPass === true;
+  const volumeMaPeriod = Math.max(1, Math.floor(configNumber(config, 'volumeMaPeriod', 20)));
+  const volumeAverage = averageVolumeForWindow(candles.slice(-volumeMaPeriod));
+  const volumeRatio = Number.isFinite(Number(currentCandle?.volume)) && Number.isFinite(volumeAverage) && volumeAverage > 0 ? Number(currentCandle.volume) / volumeAverage : null;
+  const strongThreshold = configNumber(config, 'fundingStrongThreshold', 0.0002);
+  const strongFundingPass = Number.isFinite(fundingRate) && Math.abs(fundingRate) > strongThreshold;
+  const rsiSeries = buildRsiSeries(candles, Math.max(1, Math.floor(configNumber(config, 'rsiPeriod', 14))));
+  const rsi = rsiSeries.at(-1) ?? indicators.rsi;
+  const rsiCrowdedPass = direction === 'SHORT'
+    ? Number.isFinite(rsi) && rsi > 65
+    : Number.isFinite(rsi) && rsi < 35;
+  const volumeStrongPass = Number.isFinite(volumeRatio) && volumeRatio > configNumber(config, 'volumeStrongRatio', 1.5);
+  const items = [
+    scoreItem('strongFundingExtreme', 'Funding rate beyond strong threshold', strongFundingPass ? 1 : 0, 1, strongFundingPass, `Funding ${(Number.isFinite(fundingRate) ? fundingRate * 100 : 0).toFixed(4)}%.`),
+    scoreItem('rsiCrowding', 'RSI confirms crowding', rsiCrowdedPass ? 1 : 0, 1, rsiCrowdedPass, Number.isFinite(rsi) ? `RSI ${rsi.toFixed(1)}.` : 'RSI unavailable.'),
+    scoreItem('confirmationVolume', 'Confirmation volume > threshold', volumeStrongPass ? 1 : 0, 1, volumeStrongPass, `Volume ratio ${Number.isFinite(volumeRatio) ? volumeRatio.toFixed(2) : '--'}.`),
+  ];
+  const finalScore = items.reduce((sum, item) => sum + item.points, 0);
+  const blockedReasons = [];
+  const waitReasons = [];
+  if (!fundingExtreme) waitReasons.push('No funding extreme for this direction in confirmation window.');
+  if (fundingExtreme && !confirmationPass) waitReasons.push('Funding extreme confirmation candle not found.');
+  if (fundingExtreme && confirmationPass && !trendPass) blockedReasons.push('Funding extreme trend filter failed.');
+  if (fundingExtreme && confirmationPass && !rrPass) blockedReasons.push('Funding extreme RR is below minimum or unavailable.');
+  if (fundingExtreme && confirmationPass && (!Number.isFinite(levels.sl) || !Number.isFinite(levels.tp1) || !Number.isFinite(levels.risk) || levels.risk <= 0)) blockedReasons.push('Funding extreme risk levels are invalid.');
+  let status = 'NO_TRADE';
+  if (!blockedReasons.length && fundingExtreme && confirmationPass) status = finalScore >= config.entryScore ? direction : finalScore >= 1 ? 'WAIT' : 'NO_TRADE';
+  const checks = { fundingPass: fundingExtreme, trendPass, confirmationPass, volumePass: volumeStrongPass, rrPass, levelPass: fundingExtreme && confirmationPass, macdPass: true };
+  return {
+    direction,
+    status,
+    total: finalScore,
+    technicalTotal: finalScore,
+    adjustmentTotal: 0,
+    rawTotal: finalScore,
+    max: items.length,
+    items,
+    adjustments: [],
+    breakdown: Object.fromEntries(items.map((item) => [item.key, item.points])),
+    hardBlock: blockedReasons[0] ?? null,
+    blockedReasons,
+    rejectionReasons: unique([...blockedReasons, ...waitReasons, ...items.filter((item) => !item.passed).map((item) => item.reason)]),
+    waitReasons,
+    warnings: [],
+    entryContext: status === direction ? 'SAFE_ENTRY' : finalScore >= 1 ? 'WAIT_CONFIRMATION' : 'CHOPPY_MARKET',
+    entryAdvice: status === direction ? ENTRY_ADVICE.SAFE_ENTRY : finalScore >= 1 ? ENTRY_ADVICE.WAIT_CONFIRMATION : ENTRY_ADVICE.CHOPPY_MARKET,
+    btcAdjustment: { points: 0, warning: null },
+    fundingOiAdjustment: { points: 0, warnings: [] },
+    checks,
+    diagnostics: {
+      strategyType: 'fundingRateExtreme',
+      direction,
+      fundingExtreme,
+      trendPass,
+      confirmationPass,
+      score: finalScore,
+      fundingRate: round(fundingRate),
+      fundingAgeCandles: funding?.ageCandles ?? null,
+      rsi: round(rsi),
+      volumeRatio: round(volumeRatio),
+      rrPass,
     },
     levels,
   };
@@ -4181,6 +4365,8 @@ export function buildSignalSetup(indicators, options = {}) {
       ? buildMeanReversionSqueezeCandidate
       : experimentSignalConfig.strategyType === 'rsiDivergenceReversal'
       ? buildRsiDivergenceCandidate
+      : experimentSignalConfig.strategyType === 'fundingRateExtreme'
+      ? buildFundingRateExtremeCandidate
       : experimentSignalConfig.strategyType === 'failedBreakoutReversion'
       ? buildFailedBreakoutCandidate
       : experimentSignalConfig.strategyType === 'liquiditySweepReclaim'
@@ -4195,7 +4381,7 @@ export function buildSignalSetup(indicators, options = {}) {
   const finalScore = selected.total;
   const blockedReason = unique(selected.blockedReasons ?? []);
   const signalValidity =
-    ['sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze', 'rsiDivergenceReversal'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
+    ['sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze', 'rsiDivergenceReversal', 'fundingRateExtreme'].includes(experimentSignalConfig.strategyType) && ['LONG', 'SHORT'].includes(finalSignal) && finalScore >= candidateConfig.entryScore
       ? 'VALID'
       : classifySignalValidity(finalScore, blockedReason);
   const meta = confidenceMeta(finalScore);
@@ -4244,7 +4430,7 @@ export function buildSignalSetup(indicators, options = {}) {
       short: shortCandidate,
     },
     signalDiagnostics:
-      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze', 'rsiDivergenceReversal'].includes(experimentSignalConfig.strategyType)
+      ['breakoutVolumeExpansion', 'liquiditySweepReclaim', 'sessionBreakout', 'fairValueGap', 'orderBlock', 'failedBreakoutReversion', 'meanReversionSqueeze', 'rsiDivergenceReversal', 'fundingRateExtreme'].includes(experimentSignalConfig.strategyType)
         ? {
             strategyType: experimentSignalConfig.strategyType,
             selected: selected.diagnostics ?? null,

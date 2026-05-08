@@ -1740,6 +1740,7 @@ export function runBacktest(candles, pair, timeframe, options = {}) {
     const setup = signalBuilder(
       {
         ...indicators,
+        currentTimestamp: normalizedCandles[index].time * 1000,
         higherTimeframeTrend,
         stale: false,
         feedStale: false,

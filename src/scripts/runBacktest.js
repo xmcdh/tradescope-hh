@@ -7,6 +7,7 @@ import { validateBacktest } from '../lib/backtestValidator.js';
 import { strategyMetadata } from '../config/strategyVersion.js';
 import { getExperimentFamily, getStrategyExperiment } from '../config/strategyExperiments.js';
 import { fetchBacktestOhlcv, normalizePair } from '../lib/backtestDataSource.js';
+import { pairToSymbol } from '../lib/backtestDataSource.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -159,6 +160,17 @@ function compactStoredSignalsForV2(signals = [], limit = 250) {
     }));
 }
 
+async function loadFundingCacheForPair(pair) {
+  const symbol = pairToSymbol(pair);
+  const filePath = path.join(PROJECT_ROOT, 'data/funding-cache', `${symbol}_funding.json`);
+  try {
+    const payload = JSON.parse(await fs.readFile(filePath, 'utf8'));
+    return Array.isArray(payload.records) ? { [symbol]: payload.records } : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function executeBacktestRun({
   pair,
   timeframe,
@@ -233,6 +245,12 @@ export async function executeBacktestRun({
 
   const strategyMeta = await buildVersionMetadata(experiment);
   const pairKey = normalizedPair.replace('/', '');
+  const fundingCache = await loadFundingCacheForPair(normalizedPair);
+  const previousFundingCache = globalThis.__TRADESCOPE_FUNDING_CACHE__;
+  globalThis.__TRADESCOPE_FUNDING_CACHE__ = {
+    ...(previousFundingCache ?? {}),
+    ...fundingCache,
+  };
   const backtestOptions = {
     signalMode,
     experimentConfig: experiment,

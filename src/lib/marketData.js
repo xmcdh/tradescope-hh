@@ -20,6 +20,8 @@ export const DEFAULT_SYMBOLS = DEFAULT_WATCHLIST.map((item) => item.symbol);
 export const MOMENTUM_SYMBOLS = ['DOGEUSDT', 'LINKUSDT', 'AVAXUSDT', 'ADAUSDT', 'SUIUSDT', 'APTUSDT', 'NEARUSDT'];
 export const AVOID_PAIR_REASON = 'Pair flagged as AVOID. Monitor only, no entry recommended.';
 export const CANDLE_LIMIT = 250;
+export const ETH_CONVICTION_CANDLE_LIMIT = 200;
+export const ETH_CONVICTION_FUNDING_HISTORY_DAYS = 90;
 export const PRICE_POLL_MS = 10000;
 export const CANDLE_POLL_MS = 300000;
 export const DATA_FRESH_MS = 15000;
@@ -165,6 +167,7 @@ function parseKline(kline) {
     low,
     close,
     volume,
+    closeTime,
   ] = kline;
 
   return {
@@ -174,6 +177,7 @@ function parseKline(kline) {
     low: Number(low),
     close: Number(close),
     volume: Number(volume),
+    closeTime: Math.floor(Number(closeTime) / 1000),
   };
 }
 
@@ -256,6 +260,35 @@ export async function fetchBinanceCandles(symbol, interval = TIMEFRAME, limit = 
   );
 
   return ensureKlinesPayload(payload).map(parseKline);
+}
+
+export async function fetchBinanceFundingHistory(symbol, { startTime, endTime, limit = 1000 } = {}) {
+  const normalized = normalizeSymbol(symbol);
+  const payload = await fetchBinanceJson(
+    '/api/market-data',
+    {
+      provider: 'binance',
+      type: 'fundingHistory',
+      symbol: normalized,
+      limit: String(Math.min(1000, Math.max(1, Number(limit) || 1000))),
+      ...(Number.isFinite(startTime) ? { startTime: String(Math.floor(startTime)) } : {}),
+      ...(Number.isFinite(endTime) ? { endTime: String(Math.floor(endTime)) } : {}),
+    },
+    'Binance funding history',
+    { allowEmptyArray: true },
+  );
+
+  if (!Array.isArray(payload)) {
+    throw new Error('Binance returned invalid funding history payload');
+  }
+
+  return payload
+    .map((record) => {
+      const time = Number(record?.fundingTime ?? record?.time);
+      const fundingRate = Number(record?.fundingRate);
+      return Number.isFinite(time) && Number.isFinite(fundingRate) ? { time, fundingRate } : null;
+    })
+    .filter(Boolean);
 }
 
 export async function fetchBinance24hr(symbol) {
@@ -429,6 +462,22 @@ export async function fetchBinanceMarketSnapshot(symbol, interval = TIMEFRAME) {
     dataQuality: candles.length ? 'FUTURES_CANDLES' : 'PRICE_ONLY',
     signalAllowed: Boolean(candles.length),
     candleErrorType: candles.length ? null : candlesResult.reason?.errorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
+  };
+}
+
+export async function fetchEthConvictionData() {
+  const endTime = Date.now();
+  const startTime = endTime - ETH_CONVICTION_FUNDING_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+  const [candles, latestFunding, fundingHistory] = await Promise.all([
+    fetchBinanceCandles('ETHUSDT', '1h', ETH_CONVICTION_CANDLE_LIMIT),
+    fetchBinanceFunding('ETHUSDT'),
+    fetchBinanceFundingHistory('ETHUSDT', { startTime, endTime, limit: 1000 }),
+  ]);
+
+  return {
+    candles,
+    latestFunding,
+    fundingHistory,
   };
 }
 

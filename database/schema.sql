@@ -61,6 +61,24 @@ CREATE TABLE IF NOT EXISTS paper_trades (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS conviction_trades (
+  id TEXT PRIMARY KEY,
+  portfolio_id TEXT NOT NULL,
+  date TIMESTAMPTZ NOT NULL,
+  strategy TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  entry NUMERIC,
+  sl NUMERIC,
+  tp1 NUMERIC,
+  tp2 NUMERIC,
+  score NUMERIC,
+  status TEXT NOT NULL,
+  r_outcome NUMERIC,
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS proof_snapshots (
   id TEXT PRIMARY KEY,
   verdict TEXT NOT NULL,
@@ -129,6 +147,9 @@ CREATE INDEX IF NOT EXISTS idx_paper_trades_pair_timeframe ON paper_trades (pair
 CREATE INDEX IF NOT EXISTS idx_paper_trades_strategy_version ON paper_trades (strategy_version);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_status ON paper_trades (status);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_created_at ON paper_trades (created_at);
+
+CREATE INDEX IF NOT EXISTS idx_conviction_trades_portfolio_date ON conviction_trades (portfolio_id, date);
+CREATE INDEX IF NOT EXISTS idx_conviction_trades_status ON conviction_trades (status);
 
 CREATE INDEX IF NOT EXISTS idx_proof_snapshots_generated_at ON proof_snapshots (generated_at);
 CREATE INDEX IF NOT EXISTS idx_proof_snapshots_strategy_version ON proof_snapshots (strategy_version);

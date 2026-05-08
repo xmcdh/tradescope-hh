@@ -71,6 +71,27 @@ const TABLES = {
       updatedAt: 'updated_at',
     },
   },
+  convictionTrades: {
+    name: 'conviction_trades',
+    orderBy: 'date ASC',
+    columns: {
+      id: 'id',
+      portfolioId: 'portfolio_id',
+      date: 'date',
+      strategy: 'strategy',
+      direction: 'direction',
+      entry: 'entry',
+      sl: 'sl',
+      tp1: 'tp1',
+      tp2: 'tp2',
+      score: 'score',
+      status: 'status',
+      rOutcome: 'r_outcome',
+      notes: 'notes',
+      createdAt: 'created_at',
+      updatedAt: 'updated_at',
+    },
+  },
   proofSnapshots: {
     name: 'proof_snapshots',
     orderBy: 'created_at ASC',
@@ -357,6 +378,30 @@ export function createDatabaseStorage(options = {}) {
       }
 
       await updateRow({ databaseUrl, provider, poolFactory, collectionKey: 'paperTrades', id, updates });
+    },
+
+    async readConvictionTrades() {
+      if (!configured) {
+        return [];
+      }
+
+      return listRows({ databaseUrl, provider, poolFactory, collectionKey: 'convictionTrades' });
+    },
+
+    async writeConvictionTrade(entry) {
+      if (!configured) {
+        throw new Error('Database storage is not configured. Set DATABASE_URL before enabling database mode.');
+      }
+
+      await upsertRow({ databaseUrl, provider, poolFactory, collectionKey: 'convictionTrades', payload: entry });
+    },
+
+    async updateConvictionTrade(id, updates) {
+      if (!configured) {
+        throw new Error('Database storage is not configured. Set DATABASE_URL before enabling database mode.');
+      }
+
+      await updateRow({ databaseUrl, provider, poolFactory, collectionKey: 'convictionTrades', id, updates });
     },
 
     async readProofSnapshots() {

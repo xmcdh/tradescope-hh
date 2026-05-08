@@ -461,7 +461,13 @@ export function calculateIndicators(candles, timeframe = '15m') {
   const price = lastCandle?.close ?? null;
   const lastCandleRange =
     Number.isFinite(lastCandle?.high) && Number.isFinite(lastCandle?.low) ? lastCandle.high - lastCandle.low : null;
-  const lastUpdate = Number.isFinite(lastCandle?.time) ? lastCandle.time * 1000 : null;
+  const timestampSource = Number.isFinite(lastCandle?.closeTime) ? lastCandle.closeTime : lastCandle?.time;
+  const currentTimestamp = Number.isFinite(timestampSource)
+    ? timestampSource > 10_000_000_000
+      ? timestampSource
+      : timestampSource * 1000
+    : null;
+  const lastUpdate = currentTimestamp;
   const stale = Number.isFinite(lastUpdate) ? Date.now() - lastUpdate > timeframeMs(timeframe) * 2 : true;
   const dataStatus = ema200Valid
     ? { valid: true, reason: null }
@@ -473,6 +479,7 @@ export function calculateIndicators(candles, timeframe = '15m') {
     ema200Valid,
     stale,
     lastUpdate,
+    currentTimestamp,
     timeframe,
     price,
     ema20,

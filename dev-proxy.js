@@ -12,8 +12,10 @@ import {
   isHtmlResponse,
 } from './server/binanceProxy.js';
 import { handleMarketDataRequest } from './server/marketDataRoute.js';
+import { closeConvictionTrade, logConvictionTrade, readConvictionTrades } from './src/lib/paperTrader.js';
 
 const app = express();
+app.use(express.json());
 const insecureTlsAgent = new https.Agent({ rejectUnauthorized: false });
 
 function isCertificateFailure(error) {
@@ -247,6 +249,25 @@ app.get('/api/binance-ws-fallback', async (req, res) => {
         message: error.message,
       }),
     );
+  }
+});
+
+app.get('/api/paper-trading/conviction', async (req, res) => {
+  setCors(res);
+  res.json({ trades: await readConvictionTrades() });
+});
+
+app.post('/api/paper-trading/conviction', async (req, res) => {
+  try {
+    if (req.body?.action === 'close') {
+      await closeConvictionTrade(req.body.id, req.body.status);
+    } else {
+      await logConvictionTrade(req.body ?? {});
+    }
+    setCors(res);
+    res.json({ ok: true, trades: await readConvictionTrades() });
+  } catch (error) {
+    sendError(res, { error: error.message }, 400);
   }
 });
 

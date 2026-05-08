@@ -46,6 +46,15 @@ export const OFFICIAL_PAPER_SETUPS = [
   },
 ];
 
+export const ETH_CONVICTION_PORTFOLIO = {
+  portfolioId: 'ETH-conviction-v1',
+  pair: 'ETH/USDT',
+  timeframe: '1h',
+  strategies: ['v3-E', 'v7'],
+  maxConcurrentTrades: 1,
+  sizing: '1R fixed',
+};
+
 export function officialPaperTrackingStartTimestamp() {
   if (!OFFICIAL_PAPER_TRACKING_START_DATE) {
     return null;

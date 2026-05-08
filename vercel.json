@@ -11,6 +11,10 @@
       "destination": "/"
     },
     {
+      "source": "/eth-conviction",
+      "destination": "/"
+    },
+    {
       "source": "/proof",
       "destination": "/"
     },

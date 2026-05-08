@@ -1,9 +1,13 @@
 import {
   getStorageStatus,
+  readConvictionTradesStorage,
   readPaperTradesStorage,
+  updateConvictionTrade,
   updatePaperTrade,
+  writeConvictionTrade,
   writePaperTrade,
 } from './storageAdapter.js';
+import { ETH_CONVICTION_PORTFOLIO } from '../config/paperTrackingConfig.js';
 import { classifySignalForPaper, loadSetupRegistry, lookupSetupEntry } from './setupRegistry.js';
 import { strategyMetadata, strategyVersion } from '../config/strategyVersion.js';
 
@@ -262,4 +266,72 @@ export async function getPaperTradesPath() {
 
 export async function getPaperTradeStorageStatus() {
   return getStorageStatus();
+}
+
+export async function readConvictionTrades() {
+  const parsed = await readConvictionTradesStorage();
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+function normalizeConvictionStatus(status) {
+  const normalized = String(status ?? 'OPEN').toUpperCase();
+  return ['OPEN', 'TP1', 'TP2', 'SL'].includes(normalized) ? normalized : 'OPEN';
+}
+
+function rOutcomeForStatus(status) {
+  if (status === 'TP1') return 0.75;
+  if (status === 'TP2') return 2.25;
+  if (status === 'SL') return -1;
+  return null;
+}
+
+export async function logConvictionTrade({ strategy, direction, entry, sl, tp1, tp2, score, notes = '' }) {
+  const now = new Date().toISOString();
+  const cleanStrategy = ['v3-E', 'v7'].includes(strategy) ? strategy : null;
+  const cleanDirection = ['LONG', 'SHORT'].includes(direction) ? direction : null;
+  if (!cleanStrategy || !cleanDirection) {
+    throw new Error('Invalid conviction trade strategy or direction.');
+  }
+
+  const trades = await readConvictionTrades();
+  const hasOpenTrade = trades.some((trade) => trade.portfolioId === ETH_CONVICTION_PORTFOLIO.portfolioId && trade.status === 'OPEN');
+  if (hasOpenTrade) {
+    throw new Error('ETH conviction portfolio already has an open trade.');
+  }
+
+  const record = {
+    id: `conviction:${ETH_CONVICTION_PORTFOLIO.portfolioId}:${now}`,
+    portfolioId: ETH_CONVICTION_PORTFOLIO.portfolioId,
+    date: now,
+    strategy: cleanStrategy,
+    direction: cleanDirection,
+    entry: Number(entry),
+    sl: Number(sl),
+    tp1: Number(tp1),
+    tp2: Number(tp2),
+    score: Number(score),
+    status: 'OPEN',
+    rOutcome: null,
+    notes,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  await writeConvictionTrade(record);
+  return record;
+}
+
+export async function closeConvictionTrade(id, status) {
+  const cleanStatus = normalizeConvictionStatus(status);
+  if (cleanStatus === 'OPEN') {
+    throw new Error('Close status must be TP1, TP2, or SL.');
+  }
+
+  const updates = {
+    status: cleanStatus,
+    rOutcome: rOutcomeForStatus(cleanStatus),
+    updatedAt: new Date().toISOString(),
+  };
+  await updateConvictionTrade(id, updates);
+  return updates;
 }

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import EthConvictionMonitor from './components/EthConvictionMonitor';
 import MainChart from './components/MainChart';
 import MarketDataHealth from './components/MarketDataHealth';
 import RightPanel from './components/RightPanel';
@@ -628,6 +629,10 @@ export default function App() {
 
   if (pathname === '/paper-trading') {
     return <PaperTradingPage />;
+  }
+
+  if (pathname === '/eth-conviction') {
+    return <EthConvictionMonitor />;
   }
 
   if (pathname === '/proof' || pathname === '/validation') {

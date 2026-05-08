@@ -1,4 +1,4 @@
-import { readPaperTrades, syncPaperTrades } from '../src/lib/paperTrader.js';
+import { closeConvictionTrade, logConvictionTrade, readConvictionTrades, readPaperTrades, syncPaperTrades } from '../src/lib/paperTrader.js';
 import { computePerformanceStats } from '../src/lib/performanceStats.js';
 import { loadLiveGate } from '../src/lib/liveGate.js';
 import { loadPaperHealth } from '../src/lib/paperHealth.js';
@@ -15,6 +15,11 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'GET') {
+    if (req.url?.includes('/conviction') || req.query?.type === 'conviction') {
+      const trades = await readConvictionTrades();
+      return res.status(200).json({ trades });
+    }
+
     const trades = await readPaperTrades();
     const stats = computePerformanceStats(trades);
     const gate = await loadLiveGate();
@@ -24,6 +29,22 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
+    if (req.url?.includes('/conviction') || req.query?.type === 'conviction') {
+      try {
+        if (req.body?.action === 'close') {
+          await closeConvictionTrade(req.body.id, req.body.status);
+          const trades = await readConvictionTrades();
+          return res.status(200).json({ ok: true, trades });
+        }
+
+        const trade = await logConvictionTrade(req.body ?? {});
+        const trades = await readConvictionTrades();
+        return res.status(200).json({ ok: true, trade, trades });
+      } catch (error) {
+        return res.status(400).json({ error: error.message });
+      }
+    }
+
     const { pair, timeframe, setup, candles } = req.body ?? {};
     if (!pair || !timeframe || !setup || !Array.isArray(candles)) {
       return res.status(400).json({ error: 'Missing pair, timeframe, setup, or candles.' });

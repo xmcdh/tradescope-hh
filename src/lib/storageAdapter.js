@@ -11,6 +11,7 @@ const DATABASE_CONNECTION_WARNING =
 const COLLECTION_FILES = {
   signalLogs: 'signal-log.json',
   paperTrades: 'paper-trades.json',
+  convictionTrades: 'conviction-trades.json',
   proofSnapshots: 'proof-snapshots.json',
   setupApprovals: 'setup-approvals.json',
 };
@@ -122,6 +123,7 @@ function createMemoryStorage(options = {}) {
   const state = {
     signalLogs: [...(options.seed?.signalLogs ?? [])],
     paperTrades: [...(options.seed?.paperTrades ?? [])],
+    convictionTrades: [...(options.seed?.convictionTrades ?? [])],
     proofSnapshots: [...(options.seed?.proofSnapshots ?? [])],
     setupApprovals: [...(options.seed?.setupApprovals ?? [])],
   };
@@ -171,6 +173,15 @@ function createMemoryStorage(options = {}) {
     },
     async updatePaperTrade(id, updates) {
       update('paperTrades', id, updates);
+    },
+    async readConvictionTrades() {
+      return [...state.convictionTrades];
+    },
+    async writeConvictionTrade(entry) {
+      upsert('convictionTrades', entry);
+    },
+    async updateConvictionTrade(id, updates) {
+      update('convictionTrades', id, updates);
     },
     async readProofSnapshots() {
       return [...state.proofSnapshots];
@@ -423,6 +434,27 @@ export function createStorageAdapter(options = {}) {
         : backend.updateCollectionItem('paperTrades', id, updates);
     },
 
+    async readConvictionTrades() {
+      const { backend } = await resolveBackend();
+      return backend.readConvictionTrades
+        ? backend.readConvictionTrades()
+        : backend.readCollection('convictionTrades');
+    },
+
+    async writeConvictionTrade(entry) {
+      const { backend } = await resolveBackend();
+      return backend.writeConvictionTrade
+        ? backend.writeConvictionTrade(entry)
+        : backend.upsertCollectionItem('convictionTrades', entry);
+    },
+
+    async updateConvictionTrade(id, updates) {
+      const { backend } = await resolveBackend();
+      return backend.updateConvictionTrade
+        ? backend.updateConvictionTrade(id, updates)
+        : backend.updateCollectionItem('convictionTrades', id, updates);
+    },
+
     async readProofSnapshots() {
       const { backend } = await resolveBackend();
       return backend.readProofSnapshots
@@ -493,6 +525,18 @@ export async function writePaperTrade(entry) {
 
 export async function updatePaperTrade(id, updates) {
   return defaultStorageAdapter.updatePaperTrade(id, updates);
+}
+
+export async function readConvictionTradesStorage() {
+  return defaultStorageAdapter.readConvictionTrades();
+}
+
+export async function writeConvictionTrade(entry) {
+  return defaultStorageAdapter.writeConvictionTrade(entry);
+}
+
+export async function updateConvictionTrade(id, updates) {
+  return defaultStorageAdapter.updateConvictionTrade(id, updates);
 }
 
 export async function readProofSnapshots() {

@@ -3,6 +3,7 @@ import { getWatchlistMeta } from '../lib/marketData';
 
 const navItems = [
   { icon: 'dashboard', label: 'Dashboard', active: true, badge: 'LIVE' },
+  { icon: 'signal', label: 'ETH Conviction', href: '/eth-conviction', badge: 'LIVE' },
   { icon: 'signal', label: 'Live Signals', disabled: true, badge: 'SOON' },
   { icon: 'chart', label: 'Chart View', disabled: true, badge: 'SOON' },
   { icon: 'watchlist', label: 'Watchlist', disabled: true, badge: 'SOON' },
@@ -132,6 +133,9 @@ function NavBadge({ type }) {
 
 function NavItem({ item, collapsed }) {
   const label = collapsed ? null : item.label;
+  const activeClass = item.active
+    ? 'border-b-[#7c6af7] text-white md:border-l-[#7c6af7] md:bg-[#1e232d]'
+    : 'border-b-transparent text-[var(--text-secondary)] hover:text-white md:border-l-transparent hover:bg-[#1e232d]';
 
   if (item.disabled) {
     return (
@@ -156,7 +160,13 @@ function NavItem({ item, collapsed }) {
     <button
       key={item.label}
       type="button"
-      className="relative flex h-14 w-full flex-col items-center justify-center gap-1 rounded-md border-b-2 border-b-[#7c6af7] bg-transparent px-1 text-center text-[10px] font-semibold text-white transition md:h-auto md:flex-row md:justify-start md:gap-3 md:border-b-0 md:border-l-2 md:border-l-[#7c6af7] md:bg-[#1e232d] md:px-3 md:py-2.5 md:text-left md:text-sm"
+      onClick={() => {
+        if (item.href) {
+          window.history.pushState({}, '', item.href);
+          window.dispatchEvent(new Event('popstate'));
+        }
+      }}
+      className={`relative flex h-14 w-full flex-col items-center justify-center gap-1 rounded-md border-b-2 bg-transparent px-1 text-center text-[10px] font-semibold transition md:h-auto md:flex-row md:justify-start md:gap-3 md:border-b-0 md:border-l-2 md:px-3 md:py-2.5 md:text-left md:text-sm ${activeClass}`}
     >
       <NavIcon name={item.icon} />
       <span className="hidden max-w-full min-w-0 flex-1 truncate md:inline">{label}</span>
@@ -220,7 +230,7 @@ export default function Sidebar({
       </div>
 
       <div className="flex h-full flex-none overflow-hidden px-2 py-1 md:h-auto md:flex-1 md:flex-col md:overflow-y-auto md:px-3 md:py-4">
-        <nav className="grid w-full grid-cols-5 gap-1 md:block md:space-y-1">
+        <nav className="grid w-full grid-cols-6 gap-1 md:block md:space-y-1">
           <SectionLabel collapsed={collapsed}>Main Menu</SectionLabel>
           {navItems.map((item) => (
             <NavItem key={item.label} item={item} collapsed={collapsed} />

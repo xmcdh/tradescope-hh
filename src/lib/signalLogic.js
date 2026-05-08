@@ -3221,13 +3221,17 @@ function buildRsiDivergenceCandidate(direction, indicators, options, marketRegim
 }
 
 
-function getFundingCacheRecords(symbol) {
-  const records = globalThis.__TRADESCOPE_FUNDING_CACHE__?.[String(symbol ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase()];
+function getFundingCacheRecords(symbol, options = {}) {
+  const normalizedSymbol = String(symbol ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+  const optionCache = options.fundingCache;
+  const records = Array.isArray(optionCache)
+    ? optionCache
+    : optionCache?.[normalizedSymbol] ?? globalThis.__TRADESCOPE_FUNDING_CACHE__?.[normalizedSymbol];
   return Array.isArray(records) ? records : [];
 }
 
-function fundingRecordForTimestamp(symbol, timestamp, config) {
-  const records = getFundingCacheRecords(symbol);
+function fundingRecordForTimestamp(symbol, timestamp, config, options = {}) {
+  const records = getFundingCacheRecords(symbol, options);
   const currentTime = Number(timestamp);
   const windowMs = Math.max(1, Math.floor(configNumber(config, 'confirmationWindowCandles', 6))) * 60 * 60 * 1000;
   if (!records.length || !Number.isFinite(currentTime)) {
@@ -3286,7 +3290,7 @@ function buildFundingRateExtremeCandidate(direction, indicators, options, market
     : [];
   const currentCandle = indicators.lastCandle ?? candles.at(-1);
   const entry = Number(currentCandle?.close ?? indicators.price);
-  const funding = fundingRecordForTimestamp(symbol, indicators.currentTimestamp, config);
+  const funding = fundingRecordForTimestamp(symbol, indicators.currentTimestamp, config, options);
   const positiveThreshold = configNumber(config, 'fundingPositiveThreshold', 0.0001);
   const negativeThreshold = configNumber(config, 'fundingNegativeThreshold', -0.0001);
   const fundingRate = Number(funding?.fundingRate);

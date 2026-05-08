@@ -555,20 +555,40 @@ Exit sizing (tp1SizeRatio) may not be correctly implemented in backtest engine. 
 
 ### 2026-05-07 — V6 Trend Pullback Entry
 
-**Status:** PRE-AUDIT IN PROGRESS
+**Status:** CLOSED — rejected at audit
 **Date:** 2026-05-07
 
 **Hypothesis:**
-In an established trend (EMA21 > EMA55 > EMA200 for uptrend, inverse for downtrend), enter on first pullback that stalls at EMA21. Ride continuation of existing trend.
+Enter on EMA21 pullback in established trend (EMA21 > EMA55 > EMA200).
 
-**Why different from v2-v5:**
-All previous hypotheses were reversal or compression-based. Crypto has strong trending periods that were being fought against. Pullback entry rides the trend, does not predict reversals.
+**Audit result:**
+- BTC: 32.59 episodes/month, stall rate 8.46%
+- ETH: 31.19 episodes/month, stall rate 9.56%
+- Threshold required: >= 50% stall rate
+- Rejected before implementation
 
-**Pre-audit targets:**
-- Pullbacks/month >= 10 per pair
-- Stall rate >= 50%
+**Lesson:**
+EMA21 pullback in crypto 1h does not produce reliable recovery signals. Price returns to EMA21 frequently but recovery candles are mostly weak and choppy — not tradeable with confidence. Pre-audit process correctly prevented wasted implementation effort.
 
-**Status:** Audit running, result pending.
+## Research Summary
+
+| Version | Hypothesis | Closed Reason |
+|---|---|---|
+| v1.x | ATR Risk | Bug MACD |
+| v2 | Breakout Volume | No edge |
+| v3-B | Session Breakout | 24/7 crypto, false breakout 43% |
+| v3-C | Fair Value Gap | Fill rate 26-28% |
+| v3-D | Order Block | Return rate 31%, needs >50% |
+| v3-E | Failed Breakout | Edge real (ETH 0.46R) but ~1.8/month |
+| v4 | Mean Reversion Squeeze | WR 37%, continuation not reversion |
+| v5 | RSI Divergence | BTC WR 49% but Exp 0.22R, altcoins no edge |
+| v6 | Trend Pullback EMA21 | Stall rate 8-9%, rejected at audit |
+
+What we have learned:
+- OHLCV + standard indicators alone may be insufficient for consistent edge in crypto futures 1h
+- ETH has localized edges (v3-E) but they don't generalize or scale
+- BTC shows partial signals (v5 WR 49%) but payoff structure is insufficient
+- Reversal, compression, and trend strategies all tested and failed
 
 ### Research Guardrails (Do Not Violate)
 

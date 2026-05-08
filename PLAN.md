@@ -590,6 +590,34 @@ EMA21 pullback in crypto 1h does not produce reliable recovery signals. Price re
 **Lesson:**
 Funding-rate extreme is a genuine crypto-specific edge source, but only at strict confirmation quality. Increasing frequency by lowering score or funding thresholds dilutes the edge below gate. Funding extreme with full confirmation is a rare event, not viable as standalone live strategy at 1h.
 
+### 2026-05-08 — ETH Conviction Portfolio
+**Status:** CANDIDATE
+**Strategies:** v3-E + v7 combined
+**Pair:** ETH/USDT only
+
+**Combined backtest:**
+- Trades: 51 (over 3.5 years)
+- WinRate: 50.98%
+- Expectancy: 0.5441R
+- MaxDD: 3.00R
+- Frequency: 1.28 trades/month
+
+**Validation:**
+- OOS degradation: 10.34% PASS (<=25%)
+- Profit concentration: 12.80% PASS (<50%)
+- Walk-forward: 3/5 CAVEAT
+  W5 failure = window boundary artifact
+  W3 failure = 1-trade small-sample noise
+  Not genuine regime dependency
+
+**Caveats:**
+- Frequency 1.28/month = conviction system
+- 2025-H2 shows 4L in 6 trades, monitor for regime shift
+- Walk-forward ambiguity requires stricter position sizing policy
+
+**Next step:**
+Paper trading observation phase. Minimum 6 months, target >= 8 trades, WR > 45%, Exp > 0.3R.
+
 ## Research Summary
 
 | Version | Hypothesis | Closed Reason |
@@ -678,6 +706,38 @@ Questions to answer:
 | Losing month concentration | Detect regime dependency |
 
 Do not open V8 until this combined ETH portfolio audit is complete.
+
+## ETH Conviction Portfolio — Paper Trading Rules
+
+**System:** ETH/USDT only
+**Strategies:** v3-E + v7 combined
+**Sizing:** Fixed 1R per trade
+**Max concurrent trades:** 1
+If both strategies fire simultaneously, take higher score signal only.
+
+**Entry checklist:**
+- Signal from v3-E or v7 (not manual)
+- Score meets required threshold
+- No open ETH position currently
+- Record: date, strategy, direction, entry price, SL, TP1, TP2, score
+
+**Exit rules:**
+- TP1 hit: close 50%, move SL to BE
+- TP2 hit: close remaining 50%
+- SL hit: full loss, record -1R
+- No manual exits outside TP/SL
+
+**Paper phase gate (6 months minimum):**
+- Trades: >= 8
+- WinRate: > 45%
+- Expectancy: > 0.3R
+- MaxDD: < 15%
+- No 3+ consecutive losses
+
+**If paper gate passes after 6 months:**
+Eligible for live trading discussion.
+**If paper gate fails:**
+Return to research. Do not force live.
 
 ### Research Guardrails (Do Not Violate)
 

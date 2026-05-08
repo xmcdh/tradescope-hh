@@ -934,6 +934,10 @@ export const v3EdgeRedesignExperiments = [
   },
   {
     experimentId: 'v3-failed-breakout-long-only',
+    portfolioStatus: 'CANDIDATE',
+    portfolioName: 'ETH-conviction-v1',
+    portfolioDate: '2026-05-08',
+    portfolioNote: 'Combined ETH portfolio passed OOS (10.34% degradation) and profit concentration (12.80%). Walk-forward 3/5 — two failures are window artifact and small-sample noise, not genuine regime dependency. Promoted with caveat: monitor for regime shift in 2025-H2.',
     status: 'closed',
     closedReason: 'frequency-too-low',
     closedDate: '2026-05-07',
@@ -1070,6 +1074,10 @@ export const v3EdgeRedesignExperiments = [
   },
   {
     experimentId: 'v7-funding-rate-extreme',
+    portfolioStatus: 'CANDIDATE',
+    portfolioName: 'ETH-conviction-v1',
+    portfolioDate: '2026-05-08',
+    portfolioNote: 'Combined ETH portfolio passed OOS (10.34% degradation) and profit concentration (12.80%). Walk-forward 3/5 — two failures are window artifact and small-sample noise, not genuine regime dependency. Promoted with caveat: monitor for regime shift in 2025-H2.',
     status: 'closed',
     closedReason: 'frequency-too-low',
     closedDate: '2026-05-08',

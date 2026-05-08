@@ -517,6 +517,25 @@ Failed breakout reversion edge exists in ETH microstructure specifically. Hypoth
 **Lesson:**
 Raw 97% reversion rate in pre-audit was artifact of loose definition. Crypto post-squeeze behavior is momentum-driven, not mean-reverting.
 
+### 2026-05-07 — v5 RSI Divergence Reversal
+
+## v5 RSI Divergence Reversal
+**Status:** CLOSED — no edge
+**Date:** 2026-05-07
+
+**What worked:**
+- BTC/USDT WR 48.84% — above 45% gate
+- ADX < 30 filter correctly removes strong trend environments
+- Divergence lookback 50c gives meaningful signal reduction from raw
+
+**What didn't work:**
+- BTC Exp capped at 0.22R, gate is 0.3R
+- SOL WR 40.48%, ETH WR 32.35%
+- Exit structure change (TP2 2.5→3.5R, ratio 0.6→0.4) produced identical results — possible bug in exit sizing implementation, worth investigating as technical debt
+
+**Lesson:**
+RSI divergence works better as a filter than a primary signal in crypto. Altcoins (ETH, SOL) show false divergence frequently due to BTC correlation — divergence is ETH-local but trend is BTC-driven.
+
 ### Research Guardrails (Do Not Violate)
 
 These rules apply to all future research:

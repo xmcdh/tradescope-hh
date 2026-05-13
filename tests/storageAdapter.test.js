@@ -595,8 +595,8 @@ test('weekly audit markdown includes anomalies and next action', () => {
   assert.match(markdown, /Next recommended action:/);
 });
 
-test('live execution endpoint remains stubbed', async () => {
-  const response = {
+test('live execution endpoint remains stubbed and write-token protected', async () => {
+  const createResponse = () => ({
     statusCode: 200,
     headers: {},
     body: null,
@@ -614,11 +614,30 @@ test('live execution endpoint remains stubbed', async () => {
     end() {
       return this;
     },
-  };
+  });
+  const previousToken = process.env.API_WRITE_TOKEN;
+  process.env.API_WRITE_TOKEN = 'test-write-token';
 
-  await liveExecutionHandler({ method: 'POST', body: { test: true } }, response);
+  try {
+    const unauthorized = createResponse();
+    await liveExecutionHandler({ method: 'POST', headers: {}, body: { test: true } }, unauthorized);
+    assert.equal(unauthorized.statusCode, 401);
+    assert.equal(unauthorized.body.executed, undefined);
 
-  assert.equal(response.statusCode, 200);
-  assert.equal(response.body.executed, false);
-  assert.match(response.body.message, /stub/i);
+    const authorized = createResponse();
+    await liveExecutionHandler(
+      { method: 'POST', headers: { authorization: 'Bearer test-write-token' }, body: { test: true } },
+      authorized,
+    );
+
+    assert.equal(authorized.statusCode, 200);
+    assert.equal(authorized.body.executed, false);
+    assert.match(authorized.body.message, /stub/i);
+  } finally {
+    if (previousToken === undefined) {
+      delete process.env.API_WRITE_TOKEN;
+    } else {
+      process.env.API_WRITE_TOKEN = previousToken;
+    }
+  }
 });

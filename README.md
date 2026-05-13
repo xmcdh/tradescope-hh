@@ -185,9 +185,13 @@ Environment variables are only needed when optional database, proxy, or durable 
 ```bash
 DATABASE_URL=
 MARKET_DATA_PROXY_URL=
+API_WRITE_TOKEN=
+ALLOWED_ORIGINS=https://tradescope-lyart.vercel.app
 ```
 
 Do not generate trading signals from stale, blocked, price-only, or incomplete market data. Error and safety states should remain enabled.
+
+Public write endpoints require `API_WRITE_TOKEN`. Send it from trusted clients or scripts with `Authorization: Bearer <token>` or `X-TradeScope-Token: <token>`. The browser UI can include this header when the same token is saved locally under `tradescope:api-write-token`. Rotate database credentials immediately if they were ever exposed locally, in logs, or in a public repository.
 
 ## How It Works
 

@@ -8,13 +8,14 @@ export default async function handler(req, res) {
 
   try {
     const result = await handleMarketDataRequest(req.query);
-    return sendProxyResult(res, result);
+    return sendProxyResult(res, result, req);
   } catch (error) {
     return sendHandlerError(res, {
       source: String(req.query.provider ?? 'market_data'),
       endpoint: String(req.query.type ?? 'market-data'),
       symbol: req.query.symbol,
       error,
+      req,
     });
   }
 }

@@ -1,10 +1,18 @@
+import { handleOptions } from '../server/security.js';
 import { getStorageStatus } from '../src/lib/storageAdapter.js';
 
 export default async function handler(_req, res) {
+  if (handleOptions(_req, res, 'GET,OPTIONS')) {
+    return;
+  }
+
+  if (_req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed.' });
+  }
+
   try {
     const status = await getStorageStatus();
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(200).json({
       storageMode: status.mode,
       requestedMode: status.requestedMode,
@@ -12,18 +20,9 @@ export default async function handler(_req, res) {
       isDurable: status.durable,
       provider: status.provider,
       canConnect: status.canConnect,
-      error: status.error || '',
-      lastCheckedAt: status.lastCheckedAt,
       code: status.code,
       warning: status.warning,
-      hasStorageModeEnv: status.envDiagnostics?.hasStorageModeEnv ?? false,
-      rawStorageModeLength: status.envDiagnostics?.rawStorageModeLength ?? 0,
-      storageModeTrimmed: status.envDiagnostics?.storageModeTrimmed ?? '',
-      hasDatabaseUrlEnv: status.envDiagnostics?.hasDatabaseUrlEnv ?? false,
-      databaseUrlLength: status.envDiagnostics?.databaseUrlLength ?? 0,
-      nodeEnv: status.envDiagnostics?.nodeEnv ?? '',
-      vercelEnv: status.envDiagnostics?.vercelEnv ?? '',
-      deploymentRegion: status.envDiagnostics?.deploymentRegion ?? '',
+      lastCheckedAt: status.lastCheckedAt,
     });
   } catch (error) {
     return res.status(500).json({
@@ -32,17 +31,9 @@ export default async function handler(_req, res) {
       isDurable: false,
       provider: null,
       canConnect: false,
-      error: error.message,
-      lastCheckedAt: new Date().toISOString(),
       code: 'NON_DURABLE_STORAGE',
-      hasStorageModeEnv: typeof process.env.STORAGE_MODE === 'string',
-      rawStorageModeLength: typeof process.env.STORAGE_MODE === 'string' ? process.env.STORAGE_MODE.length : 0,
-      storageModeTrimmed: typeof process.env.STORAGE_MODE === 'string' ? process.env.STORAGE_MODE.trim() : '',
-      hasDatabaseUrlEnv: typeof process.env.DATABASE_URL === 'string' && process.env.DATABASE_URL.length > 0,
-      databaseUrlLength: typeof process.env.DATABASE_URL === 'string' ? process.env.DATABASE_URL.length : 0,
-      nodeEnv: process.env.NODE_ENV ?? '',
-      vercelEnv: process.env.VERCEL_ENV ?? '',
-      deploymentRegion: process.env.VERCEL_REGION ?? process.env.AWS_REGION ?? '',
+      warning: 'Unable to load storage status.',
+      lastCheckedAt: new Date().toISOString(),
     });
   }
 }

@@ -1,3 +1,4 @@
+import { handleOptions, requireWriteToken } from '../server/security.js';
 import { closeConvictionTrade, logConvictionTrade, readConvictionTrades, readPaperTrades, syncPaperTrades } from '../src/lib/paperTrader.js';
 import { computePerformanceStats } from '../src/lib/performanceStats.js';
 import { loadLiveGate } from '../src/lib/liveGate.js';
@@ -6,12 +7,8 @@ import { getStorageStatus } from '../src/lib/storageAdapter.js';
 import { activeStrategy } from '../src/config/strategyVersion.js';
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+  if (handleOptions(req, res, 'GET,POST,OPTIONS')) {
+    return;
   }
 
   if (req.method === 'GET') {
@@ -29,6 +26,9 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
+    const authError = requireWriteToken(req, res);
+    if (authError) return authError;
+
     if (req.url?.includes('/conviction') || req.query?.type === 'conviction') {
       try {
         if (req.body?.action === 'close') {

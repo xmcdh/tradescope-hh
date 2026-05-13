@@ -1,7 +1,10 @@
+import { handleOptions } from '../server/security.js';
 import { getServerTradingMode } from '../src/lib/tradingMode.js';
 
 export default function handler(_req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+  if (handleOptions(_req, res, 'GET,OPTIONS')) {
+    return;
+  }
   return res.status(200).json({
     tradingMode: getServerTradingMode(),
   });

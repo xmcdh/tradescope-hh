@@ -1,3 +1,4 @@
+import { handleOptions } from '../server/security.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { loadLiveGate } from '../src/lib/liveGate.js';
@@ -57,6 +58,14 @@ function deriveVerdict(proof, liveGate) {
 }
 
 export default async function handler(_req, res) {
+  if (handleOptions(_req, res, 'GET,OPTIONS')) {
+    return;
+  }
+
+  if (_req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed.' });
+  }
+
   try {
     const summary = await readLatestBatchSummary();
     const liveGate = await loadLiveGate();
@@ -67,7 +76,6 @@ export default async function handler(_req, res) {
     const setupRegistry = buildSetupRegistry(summary);
     const verdict = deriveVerdict(proof, liveGate);
 
-    res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(200).json({
       verdict,
       strategy: activeStrategy,

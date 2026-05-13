@@ -1,7 +1,14 @@
 import { ERROR_TYPES, buildErrorPayload } from './binanceProxy.js';
+import { setSecureCors } from './security.js';
 
-export function setCors(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
+export function setCors(res, req = null, methods = 'GET,OPTIONS') {
+  if (req) {
+    setSecureCors(req, res, methods);
+    return;
+  }
+
+  res.setHeader('Access-Control-Allow-Origin', 'https://tradescope-lyart.vercel.app');
+  res.setHeader('Vary', 'Origin');
 }
 
 export function rejectNonGet(req, res) {
@@ -9,7 +16,7 @@ export function rejectNonGet(req, res) {
     return false;
   }
 
-  setCors(res);
+  setCors(res, req, 'GET,OPTIONS');
   res.setHeader('Allow', 'GET');
   res.status(405).json({
     ok: false,
@@ -24,7 +31,7 @@ export function getValidatedSymbol(req, res, source = 'binance_futures', endpoin
   const symbol = String(req.query.symbol ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
 
   if (!symbol || symbol.length < 6 || symbol.length > 24) {
-    setCors(res);
+    setCors(res, req, 'GET,OPTIONS');
     res.status(400).json(
       buildErrorPayload({
         source,
@@ -41,8 +48,8 @@ export function getValidatedSymbol(req, res, source = 'binance_futures', endpoin
   return symbol;
 }
 
-export function sendProxyResult(res, result) {
-  setCors(res);
+export function sendProxyResult(res, result, req = null) {
+  setCors(res, req, 'GET,OPTIONS');
   res.setHeader('Content-Type', result.contentType);
   if (result.upstream) {
     res.setHeader('X-TradeScope-Binance-Upstream', result.upstream);
@@ -50,8 +57,8 @@ export function sendProxyResult(res, result) {
   return res.status(result.status).send(result.text);
 }
 
-export function sendHandlerError(res, { source = 'binance_futures', endpoint, symbol, error }) {
-  setCors(res);
+export function sendHandlerError(res, { source = 'binance_futures', endpoint, symbol, error, req = null }) {
+  setCors(res, req, 'GET,OPTIONS');
   return res.status(500).json(
     buildErrorPayload({
       source,

@@ -23,6 +23,7 @@ import {
 import { normalizeSignalMode } from './lib/signalLogic';
 import { getClientTradingMode } from './lib/tradingMode';
 import { buildJsonWriteHeaders } from './lib/apiSecurity';
+import { recordClientSignalJournal } from './lib/clientSignalJournal';
 
 const LEGACY_WATCHLIST_KEY = 'tradescope:watchlist';
 const HISTORY_KEY = 'tradescope:history';
@@ -375,6 +376,13 @@ function DashboardApp() {
       }
 
       lastLoggedRef.current[snapshot.symbol] = dedupeKey;
+
+      recordClientSignalJournal({
+        pair: snapshot.symbol,
+        timeframe: snapshot.timeframe,
+        setup: snapshot.setup,
+        candles: snapshot.candles,
+      });
 
       fetch('/api/signal-log', {
         method: 'POST',

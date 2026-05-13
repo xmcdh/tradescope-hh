@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { mergeSignalJournals, readClientSignalJournal } from '../lib/clientSignalJournal';
 
 function StatCard({ label, value, detail }) {
   return (
@@ -71,6 +72,118 @@ function MetricTable({ title, rows }) {
   );
 }
 
+function formatDateTime(value) {
+  if (!value) {
+    return '--';
+  }
+
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value));
+}
+
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) {
+    return '--';
+  }
+
+  const minutes = Math.floor(ms / 60000);
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${remainingMinutes}m`;
+  }
+
+  return `${remainingMinutes}m`;
+}
+
+function formatSignalPrice(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    return '--';
+  }
+
+  return number >= 1000 ? number.toFixed(2) : number >= 1 ? number.toFixed(4) : number.toFixed(6);
+}
+
+function SignalJournalTable({ entries }) {
+  const now = Date.now();
+  const rows = [...(entries ?? [])]
+    .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+    .slice(0, 80);
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)]">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-4 py-3">
+        <div className="text-sm font-semibold text-[var(--text-primary)]">Signal Journal</div>
+        <div className="text-xs text-[var(--text-secondary)]">Auto-recorded LONG/SHORT signals for forward evaluation</div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-[1080px] w-full text-left text-xs">
+          <thead className="border-b border-[var(--border-subtle)] text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">
+            <tr>
+              {['Time', 'Pair', 'TF', 'Signal', 'Entry', 'SL', 'TP', 'RR', 'Age / Duration', 'Status', 'Result R'].map((label) => (
+                <th key={label} className="px-4 py-3 font-medium">{label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length ? (
+              rows.map((entry, index) => {
+                const openedAt = Number(entry.timestamp ?? entry.candleTimestamp ?? 0);
+                const closedAt = Number(entry.exitTimestamp ?? 0);
+                const durationMs = closedAt ? closedAt - openedAt : now - openedAt;
+                const resultTone = entry.status === 'WIN'
+                  ? 'text-[var(--accent-green)]'
+                  : entry.status === 'LOSS'
+                    ? 'text-[var(--accent-red)]'
+                    : 'text-[var(--text-primary)]';
+
+                return (
+                  <tr
+                    key={entry.id ?? `${entry.pair}:${entry.timestamp}:${index}`}
+                    className={`border-b border-[var(--border-subtle)] ${index % 2 ? 'bg-[rgba(255,255,255,0.015)]' : 'bg-transparent'}`}
+                  >
+                    <td className="px-4 py-3 text-[var(--text-secondary)]">{formatDateTime(openedAt)}</td>
+                    <td className="px-4 py-3 font-semibold text-[var(--text-primary)]">{entry.pair}</td>
+                    <td className="px-4 py-3 font-mono text-[var(--text-primary)]">{entry.timeframe}</td>
+                    <td className={`px-4 py-3 font-mono font-semibold ${entry.direction === 'LONG' ? 'text-[var(--accent-green)]' : 'text-[var(--accent-red)]'}`}>
+                      {entry.direction}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-[var(--text-primary)]">{formatSignalPrice(entry.entry)}</td>
+                    <td className="px-4 py-3 font-mono text-[var(--text-primary)]">{formatSignalPrice(entry.stopLoss ?? entry.sl)}</td>
+                    <td className="px-4 py-3 font-mono text-[var(--text-primary)]">{formatSignalPrice(entry.takeProfit ?? entry.tp)}</td>
+                    <td className="px-4 py-3 font-mono text-[var(--text-primary)]">{Number.isFinite(Number(entry.rr)) ? Number(entry.rr).toFixed(2) : '--'}</td>
+                    <td className="px-4 py-3 font-mono text-[var(--text-primary)]">{formatDuration(durationMs)}</td>
+                    <td className={`px-4 py-3 font-mono font-semibold ${resultTone}`}>{entry.status ?? entry.result ?? 'OPEN'}</td>
+                    <td className={`px-4 py-3 font-mono ${resultTone}`}>{Number.isFinite(Number(entry.realizedR ?? entry.rResult)) ? Number(entry.realizedR ?? entry.rResult).toFixed(2) : '--'}</td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan="11" className="px-4 py-6 text-center text-sm text-[var(--text-secondary)]">
+                  No LONG/SHORT signals recorded yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export default function PerformancePage() {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState('');
@@ -87,11 +200,16 @@ export default function PerformancePage() {
 
         const data = await response.json();
         if (!cancelled) {
-          setPayload(data);
+          const entries = mergeSignalJournals(data.entries, readClientSignalJournal());
+          setPayload({ ...data, entries });
           setError('');
         }
       } catch (nextError) {
         if (!cancelled) {
+          const entries = readClientSignalJournal();
+          if (entries.length) {
+            setPayload({ entries, stats: null, storage: null });
+          }
           setError(nextError.message);
         }
       }
@@ -132,10 +250,11 @@ export default function PerformancePage() {
         ) : null}
 
         <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <StatCard label="Total Signals" value={payload?.entries?.length ?? '--'} detail="Recorded LONG/SHORT" />
+          <StatCard label="Open Signals" value={(payload?.entries ?? []).filter((entry) => entry.status === 'OPEN').length} detail="Still running" />
           <StatCard label="Win Rate" value={overall ? `${overall.winRate}%` : '--'} detail="Resolved signals" />
           <StatCard label="Expectancy" value={overall ? overall.expectancy : '--'} detail="Average edge per trade" />
           <StatCard label="Avg R" value={overall ? overall.avgR : '--'} detail="Mean realized R multiple" />
-          <StatCard label="Total Trades" value={overall ? overall.totalTrades : '--'} detail="Closed signals only" />
           <StatCard label="False Pos" value={overall ? `${overall.falsePosRate}%` : '--'} detail="Loss + expired rate" />
         </section>
 
@@ -164,6 +283,7 @@ export default function PerformancePage() {
         <MetricTable title="Per Pair" rows={stats?.perPair} />
         <MetricTable title="Per Timeframe" rows={stats?.perTimeframe} />
         <MetricTable title="By Signal Validity" rows={stats?.perSignalValidity} />
+        <SignalJournalTable entries={payload?.entries} />
       </div>
     </main>
   );

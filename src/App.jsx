@@ -22,6 +22,7 @@ import {
 } from './lib/marketData';
 import { normalizeSignalMode } from './lib/signalLogic';
 import { getClientTradingMode } from './lib/tradingMode';
+import { buildJsonWriteHeaders } from './lib/apiSecurity';
 
 const LEGACY_WATCHLIST_KEY = 'tradescope:watchlist';
 const HISTORY_KEY = 'tradescope:history';
@@ -377,9 +378,7 @@ function DashboardApp() {
 
       fetch('/api/signal-log', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: buildJsonWriteHeaders(),
         body: JSON.stringify({
           pair: snapshot.symbol,
           timeframe: snapshot.timeframe,
@@ -391,9 +390,7 @@ function DashboardApp() {
       if (tradingMode === 'paper') {
         fetch('/api/paper-trading', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: buildJsonWriteHeaders(),
           body: JSON.stringify({
             pair: snapshot.symbol,
             timeframe: snapshot.timeframe,
@@ -410,9 +407,7 @@ function DashboardApp() {
 
         fetch('/api/live-execution', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: buildJsonWriteHeaders(),
           body: JSON.stringify({
             pair: snapshot.symbol,
             timeframe: snapshot.timeframe,

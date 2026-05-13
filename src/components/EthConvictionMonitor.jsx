@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useEthConvictionSignal } from '../hooks/useEthConvictionSignal.js';
+import { buildJsonWriteHeaders } from '../lib/apiSecurity.js';
 
 function formatPrice(value) {
   if (!Number.isFinite(Number(value))) {
@@ -72,7 +73,7 @@ export default function EthConvictionMonitor() {
     setMessage('');
     const response = await fetch('/api/paper-trading/conviction', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildJsonWriteHeaders(),
       body: JSON.stringify({
         strategy: signal.strategy,
         direction: signal.signal,
@@ -100,7 +101,7 @@ export default function EthConvictionMonitor() {
     setMessage('');
     const response = await fetch('/api/paper-trading/conviction', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildJsonWriteHeaders(),
       body: JSON.stringify({ action: 'close', id: openTrade.id, status }),
     });
     const payload = await response.json().catch(() => ({}));

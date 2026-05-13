@@ -89,6 +89,35 @@ The application combines market data, technical indicator confluence, confidence
 └──────────────────────────┘
 ```
 
+## Engine Design
+
+TradeScope currently uses a transparent, rule-based quantitative engine rather than a trained ML model. The system does not learn from user behavior or retrain automatically. Instead, it transforms raw OHLCV market data into technical features, scores candidate setups, and exposes the reasoning behind each decision.
+
+### Indicator Engine
+
+The indicator engine is a feature-engineering layer. It converts candle data into structured market features used by the signal engine:
+
+- **Trend features:** EMA20, EMA50, EMA200, and trend alignment
+- **Momentum features:** RSI(14), MACD(12,26,9), signal line, and histogram state
+- **Volatility features:** ATR and recent candle range context
+- **Volume features:** current volume, average volume, and volume spike detection
+- **Market structure:** support, resistance, pivot levels, recent highs/lows, and breakout or retest context
+- **Data quality:** stale data checks, insufficient candle checks, and safety flags
+
+### Signal Engine
+
+The signal engine acts as an interpretable scoring model. It evaluates both `LONG` and `SHORT` candidates, compares their scores, applies hard-block safety rules, and returns one conservative output:
+
+- `LONG` when bullish conditions, risk/reward, and filters are aligned
+- `SHORT` when bearish conditions, risk/reward, and filters are aligned
+- `WAIT`, `WAIT_RETEST`, or `NO_TRADE` when confirmation is incomplete or risk is unclear
+
+The confidence score is based on confluence across trend, pullback/structure, momentum, key levels, volume, risk/reward, BTC context, and funding/open-interest adjustments. This makes the output explainable instead of a black-box prediction.
+
+### ML Readiness
+
+TradeScope is not presented as a production ML trading model. However, the architecture is ML-ready because it already separates data ingestion, feature engineering, labeling/scoring, backtesting, and reporting. Future ML experiments could use the existing indicator features and backtest results for supervised learning, ranking models, or strategy validation, while keeping live execution disabled until separately proven.
+
 ## Project Structure
 
 ```text

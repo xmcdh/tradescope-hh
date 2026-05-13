@@ -12,7 +12,7 @@ import { evaluateSplitValidation, validateBacktest } from '../src/lib/backtestVa
 import { buildExperimentComparison } from '../src/lib/experimentComparison.js';
 import { buildRetestAudit, RETEST_FAILURE_BUCKETS } from '../src/lib/retestAudit.js';
 import { activeStrategy, strategyVersion } from '../src/config/strategyVersion.js';
-import { getStrategyExperiment } from '../src/config/strategyExperiments.js';
+import { getBacktestOnlyStrategyExperiments, getStrategyExperiment } from '../src/config/strategyExperiments.js';
 import {
   cacheFilePath,
   fetchBacktestOhlcv,
@@ -293,7 +293,7 @@ test('experiment comparison includes all variants as candidate-only and does not
     baselineReportPath,
   });
 
-  assert.equal(comparison.variants.length, 26);
+  assert.equal(comparison.variants.length, getBacktestOnlyStrategyExperiments().length);
   assert.equal(comparison.safety.noAutoPromotion, true);
   assert.equal(comparison.safety.globalVerdict, 'NOT READY');
   assert.ok(comparison.variants.some((variant) => variant.experimentId === 'v1.3-trend-pullback-continuation'));

@@ -47,6 +47,8 @@ STORAGE_MODE=database
 DATABASE_PROVIDER=postgres
 DATABASE_SSL=require
 DATABASE_URL=postgres://USER:PASSWORD@HOST:PORT/DB_NAME
+API_WRITE_TOKEN=replace-with-a-long-random-secret
+ALLOWED_ORIGINS=https://tradescope-lyart.vercel.app
 ```
 
 Local fallback example:
@@ -59,6 +61,9 @@ Notes:
 - `DATABASE_PROVIDER` defaults to `postgres`
 - `DATABASE_SSL=require` is the safe default for Neon and Supabase
 - use `DATABASE_SSL=disable` only when your local/Postgres environment explicitly does not require SSL
+- `API_WRITE_TOKEN` is required for protected POST/write endpoints
+- `ALLOWED_ORIGINS` should include the deployed app URL only, unless a trusted preview domain is needed
+- browser write requests can include the token by setting `localStorage.setItem('tradescope:api-write-token', '<same-token>')`
 
 ## Database Schema
 

@@ -12,3 +12,5 @@ data/imports
 .env.local
 .env.*.local
 .DS_Store
+
+data/conviction-trades.json

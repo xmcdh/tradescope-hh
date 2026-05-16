@@ -31,6 +31,20 @@ async function readLatestBatchSummary() {
   }
 }
 
+function buildSecurityStatus() {
+  const configuredOrigins = String(process.env.ALLOWED_ORIGINS ?? process.env.CORS_ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return {
+    writeProtectionConfigured: Boolean(String(process.env.API_WRITE_TOKEN ?? '').trim()),
+    corsRestricted: true,
+    allowedOriginsConfigured: configuredOrigins.length > 0,
+    defaultAllowedOrigin: 'https://tradescope-lyart.vercel.app',
+  };
+}
+
 function deriveVerdict(proof, liveGate) {
   if (!liveGate?.storage?.durable) {
     return 'NOT READY';
@@ -87,6 +101,7 @@ export default async function handler(_req, res) {
       liveGate,
       paperHealth,
       readyForLive: verdict === 'READY FOR SMALL LIVE TEST',
+      securityStatus: buildSecurityStatus(),
       whyNotReady: [
         ...(summaryMatchesActive ? [] : [`Fresh ATR backtest proof required for ${activeStrategy.strategyVersion}. Latest summary belongs to ${summaryVersion ?? 'no strategy version'}.`]),
         ...(proof?.failedCriteria ?? []),

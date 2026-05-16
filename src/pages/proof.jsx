@@ -26,6 +26,179 @@ function GateBadge({ passed, label }) {
   );
 }
 
+
+function formatPercent(value) {
+  return Number.isFinite(Number(value)) ? `${(Number(value) * 100).toFixed(1)}%` : '--';
+}
+
+function formatNumber(value, digits = 2) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(digits) : '--';
+}
+
+function gateTone(status) {
+  if (status === 'pass') {
+    return 'border-[var(--accent-green)]/30 bg-[var(--accent-green)]/10 text-[var(--accent-green)]';
+  }
+
+  if (status === 'warn') {
+    return 'border-[var(--accent-yellow)]/30 bg-[var(--accent-yellow)]/10 text-[var(--accent-yellow)]';
+  }
+
+  return 'border-[var(--accent-red)]/30 bg-[var(--accent-red)]/10 text-[var(--accent-red)]';
+}
+
+function ReadinessGate({ gate }) {
+  return (
+    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-primary)] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-[var(--text-primary)]">{gate.label}</div>
+          <div className="mt-1 text-xs text-[var(--text-secondary)]">{gate.detail}</div>
+        </div>
+        <span className={`shrink-0 rounded-md border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${gateTone(gate.status)}`}>
+          {gate.badge}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function buildReadinessGates({ payload, liveGate, paperHealth, setupRegistry, proof }) {
+  const stats = liveGate?.stats ?? {};
+  const thresholds = liveGate?.thresholds ?? {};
+  const security = payload?.securityStatus ?? {};
+  const closedTrades = stats.approvedPaperTradesClosed ?? stats.totalClosedTrades ?? 0;
+  const minClosedTrades = thresholds.minClosedTrades ?? 30;
+  const durationDays = stats.paperDurationElapsedDays ?? paperHealth?.daysElapsed ?? 0;
+  const minDurationDays = thresholds.minPaperDurationDays ?? paperHealth?.minimumDays ?? 28;
+  const approvedSetups = setupRegistry?.counts?.approved ?? paperHealth?.approvedSetupCount ?? 0;
+  const snapshotFresh = paperHealth?.snapshotFreshness === 'FRESH';
+  const writeProtected = Boolean(security.writeProtectionConfigured);
+  const liveStubbed = paperHealth?.liveExecutionStatus === 'STUBBED';
+  const oosValue = liveGate?.backtestComparison?.oosDegradation ?? stats.oosDegradation;
+
+  return [
+    {
+      label: 'Live execution state',
+      detail: liveStubbed ? 'Execution remains disabled/stubbed. This is required before any live-readiness review.' : 'Execution state is unknown. Do not proceed.',
+      status: liveStubbed ? 'pass' : 'fail',
+      badge: liveStubbed ? 'STUBBED' : 'CHECK',
+    },
+    {
+      label: 'Write endpoint protection',
+      detail: writeProtected ? 'API_WRITE_TOKEN is configured server-side. No token value is exposed.' : 'API_WRITE_TOKEN is missing; POST endpoints should stay blocked.',
+      status: writeProtected ? 'pass' : 'fail',
+      badge: writeProtected ? 'PROTECTED' : 'MISSING',
+    },
+    {
+      label: 'CORS allowlist',
+      detail: security.allowedOriginsConfigured ? 'Production allowlist is configured.' : `Default allowed origin applies: ${security.defaultAllowedOrigin ?? 'TradeScope app URL'}.`,
+      status: security.corsRestricted ? 'pass' : 'fail',
+      badge: security.corsRestricted ? 'RESTRICTED' : 'OPEN',
+    },
+    {
+      label: 'Durable storage',
+      detail: liveGate?.storage?.durable ? 'Database storage is authoritative for paper proof.' : 'Paper proof cannot count until database storage is durable.',
+      status: liveGate?.storage?.durable ? 'pass' : 'fail',
+      badge: liveGate?.storage?.durable ? 'DURABLE' : 'LOCAL',
+    },
+    {
+      label: 'Backtest proof',
+      detail: proof?.status ? `Current proof status: ${proof.status}.` : 'Fresh active-strategy proof is missing.',
+      status: proof?.status === 'PROVEN_READY_FOR_PAPER' ? 'pass' : 'fail',
+      badge: proof?.status ?? 'MISSING',
+    },
+    {
+      label: 'Approved setup universe',
+      detail: approvedSetups > 0 ? `${approvedSetups} setup(s) approved for paper review.` : 'No setup is approved for paper/live gate yet.',
+      status: approvedSetups > 0 ? 'pass' : 'fail',
+      badge: String(approvedSetups),
+    },
+    {
+      label: 'Official paper duration',
+      detail: `${durationDays}/${minDurationDays} days completed.`,
+      status: durationDays >= minDurationDays ? 'pass' : durationDays > 0 ? 'warn' : 'fail',
+      badge: `${durationDays}d`,
+    },
+    {
+      label: 'Closed approved paper trades',
+      detail: `${closedTrades}/${minClosedTrades} closed approved trades collected.`,
+      status: closedTrades >= minClosedTrades ? 'pass' : closedTrades > 0 ? 'warn' : 'fail',
+      badge: String(closedTrades),
+    },
+    {
+      label: 'Paper expectancy',
+      detail: `Current expectancy ${formatNumber(stats.expectancy)}R; target ${thresholds.expectancy ?? 0.3}R or higher.`,
+      status: (stats.expectancy ?? 0) >= (thresholds.expectancy ?? 0.3) ? 'pass' : 'fail',
+      badge: `${formatNumber(stats.expectancy)}R`,
+    },
+    {
+      label: 'Paper win rate',
+      detail: `Current win rate ${formatPercent(stats.winRate)}; target ${formatPercent(thresholds.winRate ?? 0.45)} or higher.`,
+      status: (stats.winRate ?? 0) >= (thresholds.winRate ?? 0.45) ? 'pass' : 'fail',
+      badge: formatPercent(stats.winRate),
+    },
+    {
+      label: 'Drawdown control',
+      detail: `Current max drawdown ${formatPercent(stats.maxDrawdown)}; limit below ${formatPercent(thresholds.maxDrawdown ?? 0.15)}.`,
+      status: (stats.maxDrawdown ?? 1) < (thresholds.maxDrawdown ?? 0.15) ? 'pass' : 'fail',
+      badge: formatPercent(stats.maxDrawdown),
+    },
+    {
+      label: 'OOS/backtest divergence',
+      detail: Number.isFinite(Number(oosValue)) ? `OOS degradation ${formatPercent(oosValue)}.` : 'Fresh active-strategy OOS proof is unavailable.',
+      status: Number.isFinite(Number(oosValue)) && Number(oosValue) <= (thresholds.oosDegradation ?? 0.15) ? 'pass' : 'fail',
+      badge: Number.isFinite(Number(oosValue)) ? formatPercent(oosValue) : 'MISSING',
+    },
+    {
+      label: 'Daily proof snapshot',
+      detail: snapshotFresh ? 'Latest proof snapshot is fresh today.' : `Snapshot freshness is ${paperHealth?.snapshotFreshness ?? 'MISSING'}.`,
+      status: snapshotFresh ? 'pass' : 'warn',
+      badge: paperHealth?.snapshotFreshness ?? 'MISSING',
+    },
+  ];
+}
+
+function LiveReadinessDashboard({ payload, liveGate, paperHealth, setupRegistry, proof }) {
+  const gates = buildReadinessGates({ payload, liveGate, paperHealth, setupRegistry, proof });
+  const passCount = gates.filter((gate) => gate.status === 'pass').length;
+  const failCount = gates.filter((gate) => gate.status === 'fail').length;
+  const warnCount = gates.filter((gate) => gate.status === 'warn').length;
+  const readiness = payload?.readyForLive ? 'READY FOR SMALL LIVE TEST' : failCount ? 'NOT READY' : 'REVIEW REQUIRED';
+
+  return (
+    <section className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-card)]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-4 py-4">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--text-muted)]">Live Readiness Dashboard</div>
+          <div className="mt-1 text-lg font-semibold text-[var(--text-primary)]">{readiness}</div>
+          <div className="mt-1 text-xs text-[var(--text-secondary)]">This gate is informational only. It does not enable exchange orders or approve live trading.</div>
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-center text-xs">
+          <div className="rounded-md border border-[var(--accent-green)]/25 bg-[var(--accent-green)]/10 px-3 py-2 text-[var(--accent-green)]">
+            <div className="font-mono text-lg font-semibold">{passCount}</div>
+            <div>Pass</div>
+          </div>
+          <div className="rounded-md border border-[var(--accent-yellow)]/25 bg-[var(--accent-yellow)]/10 px-3 py-2 text-[var(--accent-yellow)]">
+            <div className="font-mono text-lg font-semibold">{warnCount}</div>
+            <div>Warn</div>
+          </div>
+          <div className="rounded-md border border-[var(--accent-red)]/25 bg-[var(--accent-red)]/10 px-3 py-2 text-[var(--accent-red)]">
+            <div className="font-mono text-lg font-semibold">{failCount}</div>
+            <div>Fail</div>
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
+        {gates.map((gate) => <ReadinessGate key={gate.label} gate={gate} />)}
+      </div>
+      <div className="border-t border-[var(--border-subtle)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+        Next safe action: keep live execution stubbed, collect durable paper evidence, and only review small-live readiness after every fail gate reaches pass.
+      </div>
+    </section>
+  );
+}
+
 function OperatorNudge({ paperHealth }) {
   const nudges = [];
 
@@ -115,6 +288,14 @@ export default function ProofPage() {
             {error}
           </div>
         ) : null}
+
+        <LiveReadinessDashboard
+          payload={payload}
+          liveGate={liveGate}
+          paperHealth={paperHealth}
+          setupRegistry={setupRegistry}
+          proof={proof}
+        />
 
         <section className={`rounded-lg border px-4 py-4 ${toneClass(payload?.verdict)}`}>
           <div className="text-lg font-semibold">{payload?.verdict ?? 'NOT READY'}</div>

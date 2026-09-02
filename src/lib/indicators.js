@@ -90,11 +90,7 @@ export function calculateAtr(candles, period = 14) {
   if (!Array.isArray(candles) || candles.length < period + 1) return null;
   const trueRanges = candles.slice(1).map((candle, index) => {
     const previousClose = candles[index]?.close;
-    return Math.max(
-      candle.high - candle.low,
-      Math.abs(candle.high - previousClose),
-      Math.abs(candle.low - previousClose),
-    );
+    return Math.max(candle.high - candle.low, Math.abs(candle.high - previousClose), Math.abs(candle.low - previousClose));
   });
   if (trueRanges.length < period || trueRanges.some((value) => !Number.isFinite(value))) return null;
   let atr = average(trueRanges.slice(0, period));
@@ -118,16 +114,13 @@ function emptyMarketStructure(summary = 'Insufficient candles for market structu
 function buildPivotLevels(candles, lookback = 50, thresholdPercent = 0.6) {
   const window = candles.slice(-lookback);
   if (window.length < 6) return { support: null, resistance: null, swingHighs: [], swingLows: [] };
-
   const pivots = [];
   let direction = 0;
   let extremeHigh = { price: window[0].high, time: window[0].time };
   let extremeLow = { price: window[0].low, time: window[0].time };
-
   for (const candle of window.slice(1)) {
     if (candle.high > extremeHigh.price) extremeHigh = { price: candle.high, time: candle.time };
     if (candle.low < extremeLow.price) extremeLow = { price: candle.low, time: candle.time };
-
     if (direction >= 0 && percentDiff(candle.low, extremeHigh.price) >= thresholdPercent) {
       pivots.push({ type: 'high', ...extremeHigh });
       direction = -1;
@@ -139,15 +132,9 @@ function buildPivotLevels(candles, lookback = 50, thresholdPercent = 0.6) {
       extremeHigh = { price: candle.high, time: candle.time };
     }
   }
-
   const swingHighs = pivots.filter((pivot) => pivot.type === 'high').map((pivot) => pivot.price);
   const swingLows = pivots.filter((pivot) => pivot.type === 'low').map((pivot) => pivot.price);
-  return {
-    support: swingLows.at(-1) ?? null,
-    resistance: swingHighs.at(-1) ?? null,
-    swingHighs,
-    swingLows,
-  };
+  return { support: swingLows.at(-1) ?? null, resistance: swingHighs.at(-1) ?? null, swingHighs, swingLows };
 }
 
 function resolveSupportResistance(candles, timeframe) {
@@ -158,13 +145,11 @@ function resolveSupportResistance(candles, timeframe) {
   const previousSupport = previousRecentWindow.length ? Math.min(...previousRecentWindow.map((candle) => candle.low)) : null;
   const previousResistance = previousRecentWindow.length ? Math.max(...previousRecentWindow.map((candle) => candle.high)) : null;
   const pivot = buildPivotLevels(candles, 50, 0.6);
-
   let support = Number.isFinite(pivot.support) ? pivot.support : simpleSupport;
   let resistance = Number.isFinite(pivot.resistance) ? pivot.resistance : simpleResistance;
   let supportStrength = Number.isFinite(pivot.support) ? 'pivot' : 'simple';
   let resistanceStrength = Number.isFinite(pivot.resistance) ? 'pivot' : 'simple';
   let htfConfluence = null;
-
   if (timeframe === '1h') {
     const fourHourCandles = aggregateCandles(candles, 4 * 60 * 60);
     const higherTimeframe = buildPivotLevels(fourHourCandles, 50, 0.6);
@@ -179,7 +164,6 @@ function resolveSupportResistance(candles, timeframe) {
       htfConfluence = { ...(htfConfluence ?? {}), resistance: higherTimeframe.resistance };
     }
   }
-
   return { support, resistance, previousSupport, previousResistance, simpleSupport, simpleResistance, pivotSupport: pivot.support, pivotResistance: pivot.resistance, supportStrength, resistanceStrength, htfConfluence };
 }
 
@@ -201,61 +185,33 @@ function aggregateCandles(candles, bucketSeconds) {
 }
 
 function detectBos(candles, swingHighPoints, swingLowPoints) {
-  // BOS is a candle close through a confirmed swing, not merely a wick through it.
-  // Scan the recent structure window so a valid break does not disappear after three candles.
   const scanStart = Math.max(0, candles.length - 12);
   for (let candleIndex = candles.length - 1; candleIndex >= scanStart; candleIndex -= 1) {
     const candle = candles[candleIndex];
     const previousSwingHigh = swingHighPoints.filter((point) => point.index < candleIndex).at(-1);
     const previousSwingLow = swingLowPoints.filter((point) => point.index < candleIndex).at(-1);
-
     const bullishBreak = previousSwingHigh && candle.close > previousSwingHigh.price;
     const bearishBreak = previousSwingLow && candle.close < previousSwingLow.price;
     if (bullishBreak && bearishBreak) continue;
-
-    if (bullishBreak) {
-      return {
-        detected: true,
-        direction: 'bullish',
-        level: previousSwingHigh.price,
-        candlesAgo: candles.length - 1 - candleIndex,
-        confirmation: 'close',
-      };
-    }
-    if (bearishBreak) {
-      return {
-        detected: true,
-        direction: 'bearish',
-        level: previousSwingLow.price,
-        candlesAgo: candles.length - 1 - candleIndex,
-        confirmation: 'close',
-      };
-    }
+    if (bullishBreak) return { detected: true, direction: 'bullish', level: previousSwingHigh.price, candlesAgo: candles.length - 1 - candleIndex, confirmation: 'close' };
+    if (bearishBreak) return { detected: true, direction: 'bearish', level: previousSwingLow.price, candlesAgo: candles.length - 1 - candleIndex, confirmation: 'close' };
   }
   return { detected: false, direction: null, level: null, candlesAgo: null, confirmation: null };
 }
 
 function detectRetest(candles, bos) {
-  if (!bos.detected || !Number.isFinite(bos.level) || !Number.isInteger(bos.candlesAgo)) {
-    return {
-      retest: { detected: false, complete: false, level: null, candlesAgo: null },
-      failedRetest: { detected: false, level: null, candlesAgo: null },
-    };
-  }
-
+  if (!bos.detected || !Number.isFinite(bos.level) || !Number.isInteger(bos.candlesAgo)) return { retest: { detected: false, complete: false, level: null, candlesAgo: null }, failedRetest: { detected: false, level: null, candlesAgo: null } };
   const breakIndex = candles.length - 1 - bos.candlesAgo;
   const afterBreak = candles.slice(breakIndex + 1, breakIndex + 1 + 6);
   let touched = false;
   let complete = false;
   let failed = false;
   let touchIndex = null;
-
   for (let index = 0; index < afterBreak.length; index += 1) {
     const candle = afterBreak[index];
     const touches = candle.low <= bos.level && candle.high >= bos.level;
     const near = withinPercent(candle.low, bos.level, 0.35) || withinPercent(candle.high, bos.level, 0.35);
     if (!touches && !near) continue;
-
     touched = true;
     touchIndex = breakIndex + 1 + index;
     if (bos.direction === 'bullish') {
@@ -267,12 +223,8 @@ function detectRetest(candles, bos) {
     }
     if (failed) break;
   }
-
   const candlesAgo = touchIndex == null ? null : candles.length - 1 - touchIndex;
-  return {
-    retest: { detected: touched, complete: complete && !failed, level: touched ? bos.level : null, candlesAgo },
-    failedRetest: { detected: failed, level: failed ? bos.level : null, candlesAgo: failed ? candlesAgo : null },
-  };
+  return { retest: { detected: touched, complete: complete && !failed, level: touched ? bos.level : null, candlesAgo }, failedRetest: { detected: failed, level: failed ? bos.level : null, candlesAgo: failed ? candlesAgo : null } };
 }
 
 function detectLiquiditySweep(candles, swingHighPoints, swingLowPoints) {
@@ -281,13 +233,8 @@ function detectLiquiditySweep(candles, swingHighPoints, swingLowPoints) {
     const candle = candles[index];
     const priorHigh = swingHighPoints.filter((point) => point.index < index).at(-1);
     const priorLow = swingLowPoints.filter((point) => point.index < index).at(-1);
-
-    if (priorLow && candle.low < priorLow.price && candle.close > priorLow.price) {
-      return { detected: true, direction: 'bullish', level: priorLow.price, candlesAgo: candles.length - 1 - index, reclaimed: true };
-    }
-    if (priorHigh && candle.high > priorHigh.price && candle.close < priorHigh.price) {
-      return { detected: true, direction: 'bearish', level: priorHigh.price, candlesAgo: candles.length - 1 - index, reclaimed: true };
-    }
+    if (priorLow && candle.low < priorLow.price && candle.close > priorLow.price) return { detected: true, direction: 'bullish', level: priorLow.price, candlesAgo: candles.length - 1 - index, reclaimed: true };
+    if (priorHigh && candle.high > priorHigh.price && candle.close < priorHigh.price) return { detected: true, direction: 'bearish', level: priorHigh.price, candlesAgo: candles.length - 1 - index, reclaimed: true };
   }
   return { detected: false, direction: null, level: null, candlesAgo: null, reclaimed: false };
 }
@@ -295,12 +242,16 @@ function detectLiquiditySweep(candles, swingHighPoints, swingLowPoints) {
 export function analyzeMarketStructure(candles) {
   if (!Array.isArray(candles) || candles.length < 5) return emptyMarketStructure();
 
+  // The final candle may still be forming. Structure signals must be based only on closed candles.
+  const closedCandles = candles.length > 1 ? candles.slice(0, -1) : [];
+  if (closedCandles.length < 5) return emptyMarketStructure('Insufficient closed candles for market structure analysis.');
+
   const swingHighPoints = [];
   const swingLowPoints = [];
-  for (let index = 2; index < candles.length - 2; index += 1) {
-    const candle = candles[index];
-    const isSwingHigh = candle.high > candles[index - 1].high && candle.high > candles[index - 2].high && candle.high > candles[index + 1].high && candle.high > candles[index + 2].high;
-    const isSwingLow = candle.low < candles[index - 1].low && candle.low < candles[index - 2].low && candle.low < candles[index + 1].low && candle.low < candles[index + 2].low;
+  for (let index = 2; index < closedCandles.length - 2; index += 1) {
+    const candle = closedCandles[index];
+    const isSwingHigh = candle.high > closedCandles[index - 1].high && candle.high > closedCandles[index - 2].high && candle.high > closedCandles[index + 1].high && candle.high > closedCandles[index + 2].high;
+    const isSwingLow = candle.low < closedCandles[index - 1].low && candle.low < closedCandles[index - 2].low && candle.low < closedCandles[index + 1].low && candle.low < closedCandles[index + 2].low;
     if (isSwingHigh) swingHighPoints.push({ price: candle.high, index });
     if (isSwingLow) swingLowPoints.push({ price: candle.low, index });
   }
@@ -312,9 +263,9 @@ export function analyzeMarketStructure(candles) {
   const hasBullishStructure = isStrictlyRising(lastThreeHighs) && isStrictlyRising(lastThreeLows);
   const hasBearishStructure = isStrictlyFalling(lastThreeHighs) && isStrictlyFalling(lastThreeLows);
   const structure = hasBullishStructure ? 'BULLISH' : hasBearishStructure ? 'BEARISH' : 'NEUTRAL';
-  const bos = detectBos(candles, swingHighPoints, swingLowPoints);
-  const { retest, failedRetest } = detectRetest(candles, bos);
-  const liquiditySweep = detectLiquiditySweep(candles, swingHighPoints, swingLowPoints);
+  const bos = detectBos(closedCandles, swingHighPoints, swingLowPoints);
+  const { retest, failedRetest } = detectRetest(closedCandles, bos);
+  const liquiditySweep = detectLiquiditySweep(closedCandles, swingHighPoints, swingLowPoints);
 
   const structureSummary = [
     `Structure ${structure}.`,
@@ -330,7 +281,6 @@ export function analyzeMarketStructure(candles) {
 
 export function calculateIndicators(candles, timeframe = '15m') {
   if (!Array.isArray(candles) || candles.length < 60) return null;
-
   const closes = candles.map((candle) => candle.close);
   const highs = candles.map((candle) => candle.high);
   const lows = candles.map((candle) => candle.low);
@@ -346,7 +296,6 @@ export function calculateIndicators(candles, timeframe = '15m') {
   const marketStructure = analyzeMarketStructure(candles);
   const macdSeries = MACD.calculate({ values: closes, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
   const macd = macdSeries.length ? macdSeries.at(-1) : null;
-
   const recentWindow = candles.slice(-20);
   const recentVolumes = recentWindow.map((candle) => candle.volume);
   const currentVolume = recentVolumes.at(-1) ?? 0;
@@ -360,17 +309,8 @@ export function calculateIndicators(candles, timeframe = '15m') {
   const currentTimestamp = Number.isFinite(timestampSource) ? (timestampSource > 10_000_000_000 ? timestampSource : timestampSource * 1000) : null;
   const lastUpdate = currentTimestamp;
   const stale = Number.isFinite(lastUpdate) ? Date.now() - lastUpdate > timeframeMs(timeframe) * 2 : true;
-
-  const coreValid = Boolean(
-    ema20 != null &&
-    ema50 != null &&
-    rsi != null &&
-    atr != null &&
-    macd &&
-    Number.isFinite(price),
-  );
+  const coreValid = Boolean(ema20 != null && ema50 != null && rsi != null && atr != null && macd && Number.isFinite(price));
   const dataStatus = coreValid ? { valid: true, reason: null } : { valid: false, reason: 'indicator_calculation_incomplete' };
-
   return {
     valid: dataStatus.valid,
     reason: dataStatus.reason,

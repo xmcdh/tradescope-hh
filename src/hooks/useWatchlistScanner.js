@@ -4,23 +4,50 @@ import { scanSymbol, rankScans } from '../lib/marketScanner';
 
 const SETUP_STALE_MS = 20 * 60 * 1000;
 const CONTEXT_STALE_MS = 5 * 60 * 60 * 1000;
-const DERIVATIVE_STALE_MS = 10 * 60 * 1000;
+const OI_STALE_MS = 75 * 60 * 1000;
+const DERIVATIVE_15M_STALE_MS = 20 * 60 * 1000;
+const FUNDING_STALE_MS = 20 * 60 * 1000;
 
 function isFresh(timestamp, maxAge, now) {
   return Number.isFinite(Number(timestamp)) && now - Number(timestamp) <= maxAge;
 }
 
+function buildFreshDerivatives(snapshot, now) {
+  const source = snapshot?.derivatives ?? {};
+  const oiFresh = isFresh(source?.openInterest?.timestamp, OI_STALE_MS, now);
+  const longShortFresh = isFresh(source?.longShort?.timestamp, DERIVATIVE_15M_STALE_MS, now);
+  const takerFresh = isFresh(source?.taker?.timestamp, DERIVATIVE_15M_STALE_MS, now);
+  const fundingFresh = isFresh(snapshot?.fundingUpdatedAt, FUNDING_STALE_MS, now);
+
+  return {
+    ...source,
+    openInterest: oiFresh ? source.openInterest : { current: null, change1hPct: null, change4hPct: null, timestamp: source?.openInterest?.timestamp ?? null },
+    longShort: longShortFresh ? source.longShort : null,
+    taker: takerFresh ? source.taker : null,
+    fundingRate: fundingFresh ? snapshot?.fundingRate ?? null : null,
+    funding: fundingFresh ? snapshot?.fundingRate ?? null : null,
+    freshness: { oi: oiFresh, longShort: longShortFresh, taker: takerFresh, funding: fundingFresh },
+  };
+}
+
 function applyFreshness(scan, snapshot, now) {
   const candles15mUpdatedAt = snapshot?.candles15mUpdatedAt ?? null;
   const candles4hUpdatedAt = snapshot?.candles4hUpdatedAt ?? null;
-  const derivativesUpdatedAt = snapshot?.derivativesUpdatedAt ?? null;
   const fresh15m = isFresh(candles15mUpdatedAt, SETUP_STALE_MS, now);
   const fresh4h = isFresh(candles4hUpdatedAt, CONTEXT_STALE_MS, now);
-  const freshDerivatives = isFresh(derivativesUpdatedAt, DERIVATIVE_STALE_MS, now);
+  const derivativeFreshness = scan.derivatives?.freshness ?? {};
+  const freshDerivatives = Boolean(derivativeFreshness.oi || derivativeFreshness.longShort || derivativeFreshness.taker || derivativeFreshness.funding);
   const freshness = {
     candles15m: { updatedAt: candles15mUpdatedAt, fresh: fresh15m },
     candles4h: { updatedAt: candles4hUpdatedAt, fresh: fresh4h },
-    derivatives: { updatedAt: derivativesUpdatedAt, fresh: freshDerivatives },
+    derivatives: {
+      updatedAt: snapshot?.derivativesUpdatedAt ?? null,
+      fresh: freshDerivatives,
+      oi: Boolean(derivativeFreshness.oi),
+      longShort: Boolean(derivativeFreshness.longShort),
+      taker: Boolean(derivativeFreshness.taker),
+      funding: Boolean(derivativeFreshness.funding),
+    },
     all: fresh15m && fresh4h,
   };
 
@@ -59,7 +86,7 @@ export function useWatchlistScanner(symbols, signalMode = 'conservative', refres
   const scans = useMemo(() => {
     const now = Date.now();
     const rows = Object.values(snapshots).map((snapshot) => {
-      const derivatives = { ...snapshot?.derivatives, fundingRate: snapshot?.fundingRate ?? null, funding: snapshot?.fundingRate ?? null };
+      const derivatives = buildFreshDerivatives(snapshot, now);
       const scan = scanSymbol({
         symbol: snapshot.symbol,
         candles4h: snapshot.contextCandles ?? [],

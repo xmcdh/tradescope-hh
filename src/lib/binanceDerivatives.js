@@ -1,4 +1,4 @@
-import { normalizeSymbol, createMarketDataError, MARKET_ERROR_TYPES, normalizeTimeframe } from './marketData.js';
+import { normalizeSymbol, createMarketDataError, MARKET_ERROR_TYPES } from './marketData.js';
 
 const PROXY = import.meta.env.DEV ? 'http://localhost:3001' : '';
 const FETCH_TIMEOUT_MS = 8000;
@@ -52,7 +52,7 @@ function normalizeNumber(value) {
 }
 
 export async function fetchBinanceOpenInterestHistory(symbol, options = {}) {
-  const period = options.period ?? '15m';
+  const period = options.period ?? '1h';
   assertPeriod(period);
   const rows = await fetchJson('openinteresthistory', symbol, { ...options, period });
   return rows.map((row) => ({
@@ -103,18 +103,18 @@ function latestAtOrBefore(rows, targetTime) {
   return candidate;
 }
 
-export function calculateOpenInterestChanges(history, now = Date.now()) {
-  if (!Array.isArray(history) || history.length === 0) return { current: null, change1hPct: null, change4hPct: null };
+export function calculateOpenInterestChanges(history) {
+  if (!Array.isArray(history) || history.length === 0) return { current: null, change1hPct: null, change4hPct: null, timestamp: null };
   const sorted = [...history].filter((row) => row?.timestamp && row.sumOpenInterest != null).sort((a, b) => a.timestamp - b.timestamp);
   const current = sorted.at(-1);
-  const oneHourAgo = latestAtOrBefore(sorted, now - 60 * 60 * 1000);
-  const fourHoursAgo = latestAtOrBefore(sorted, now - 4 * 60 * 60 * 1000);
+  const oneHourAgo = latestAtOrBefore(sorted, current.timestamp - 60 * 60 * 1000);
+  const fourHoursAgo = latestAtOrBefore(sorted, current.timestamp - 4 * 60 * 60 * 1000);
   const pct = (base) => base?.sumOpenInterest ? ((current.sumOpenInterest - base.sumOpenInterest) / base.sumOpenInterest) * 100 : null;
   return { current: current.sumOpenInterest, change1hPct: pct(oneHourAgo), change4hPct: pct(fourHoursAgo), timestamp: current.timestamp };
 }
 
 export function calculateTakerCvd(history) {
-  if (!Array.isArray(history) || !history.length) return { delta: null, cvd: null, buyVolume: null, sellVolume: null };
+  if (!Array.isArray(history) || !history.length) return { delta: null, cvd: null, buyVolume: null, sellVolume: null, timestamp: null };
   const rows = [...history].filter((row) => row?.timestamp).sort((a, b) => a.timestamp - b.timestamp);
   let cvd = 0;
   let buyVolume = 0;
@@ -124,11 +124,11 @@ export function calculateTakerCvd(history) {
     if (row.sellVol != null) sellVolume += row.sellVol;
     if (row.delta != null) cvd += row.delta;
   }
-  return { delta: buyVolume - sellVolume, cvd, buyVolume, sellVolume, timestamp: rows.at(-1)?.timestamp ?? null };
+  return { delta: buyVolume - sellVolume, cvd, buyVolume, sellVolume, window: `${rows.length}×${history.length ? '15m' : ''}`, timestamp: rows.at(-1)?.timestamp ?? null };
 }
 
-export function buildDerivativeSnapshot({ openInterestHistory = [], longShortHistory = [], takerHistory = [], now = Date.now() } = {}) {
-  const oi = calculateOpenInterestChanges(openInterestHistory, now);
+export function buildDerivativeSnapshot({ openInterestHistory = [], longShortHistory = [], takerHistory = [] } = {}) {
+  const oi = calculateOpenInterestChanges(openInterestHistory);
   const taker = calculateTakerCvd(takerHistory);
   const latestLongShort = [...longShortHistory].sort((a, b) => a.timestamp - b.timestamp).at(-1) ?? null;
   return {

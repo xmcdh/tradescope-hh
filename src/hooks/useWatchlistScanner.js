@@ -2,8 +2,9 @@ import { useMemo } from 'react';
 import { useWatchlistMarketData } from './useWatchlistMarketData';
 import { scanSymbol, rankScans } from '../lib/marketScanner';
 
-export function useWatchlistScanner(symbols, signalMode = 'conservative') {
-  const snapshots = useWatchlistMarketData(symbols, '15m', signalMode);
+export function useWatchlistScanner(symbols, signalMode = 'conservative', refreshToken = 0) {
+  const effectiveSymbols = useMemo(() => [...symbols], [symbols, refreshToken]);
+  const snapshots = useWatchlistMarketData(effectiveSymbols, '15m', signalMode);
 
   const scans = useMemo(() => {
     const rows = Object.values(snapshots).map((snapshot) => {
@@ -33,6 +34,5 @@ export function useWatchlistScanner(symbols, signalMode = 'conservative') {
   }, [snapshots]);
 
   const bySymbol = useMemo(() => Object.fromEntries(scans.map((scan) => [scan.symbol, scan])), [scans]);
-
   return useMemo(() => ({ snapshots, scans, bySymbol }), [snapshots, scans, bySymbol]);
 }

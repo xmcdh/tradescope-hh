@@ -85,9 +85,10 @@ function scoreVolume(i) {
   return 2;
 }
 function scoreTaker(d, direction) {
-  const delta = number(d?.taker?.delta ?? d?.takerDelta);
-  const buy = number(d?.taker?.buyVolume), sell = number(d?.taker?.sellVolume);
-  const total = buy != null && sell != null ? buy + sell : null;
+  const delta = number(d?.taker?.delta15m ?? d?.taker?.delta);
+  const buy = number(d?.taker?.buyVolume15m ?? d?.taker?.latestBuyVolume), sell = number(d?.taker?.sellVolume15m ?? d?.taker?.latestSellVolume);
+  const fallbackBuy = number(d?.taker?.buyVolume), fallbackSell = number(d?.taker?.sellVolume);
+  const total = buy != null && sell != null ? buy + sell : fallbackBuy != null && fallbackSell != null ? fallbackBuy + fallbackSell : null;
   if (delta == null || total == null || total <= 0 || direction === 'NEUTRAL') return delta != null && total > 0 ? 3 : 0;
   const alignedRatio = (delta / total) * directionSign(direction);
   if (alignedRatio >= 0.15) return 7;
@@ -114,7 +115,7 @@ function scoreOi(d, direction) {
   const magnitude = Math.abs(change);
   let score = magnitude >= 5 ? 6 : magnitude >= 3 ? 5 : magnitude >= 1.5 ? 4 : 3;
   if (direction === 'NEUTRAL') return Math.min(8, score);
-  const takerDelta = number(d?.taker?.delta ?? d?.takerDelta);
+  const takerDelta = number(d?.taker?.delta1h ?? d?.taker?.delta);
   const takerBuy = number(d?.taker?.buyVolume), takerSell = number(d?.taker?.sellVolume);
   const takerTotal = takerBuy != null && takerSell != null ? takerBuy + takerSell : 0;
   const takerSign = takerDelta != null && takerTotal > 0 ? Math.sign(takerDelta) : 0;

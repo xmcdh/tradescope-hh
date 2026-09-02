@@ -9,7 +9,12 @@ function formatScan(scan) {
   const h = scan?.htf ?? {};
   const s = scan?.setup ?? {};
   const d = scan?.derivatives ?? {};
+  const oi = d?.openInterest ?? {};
+  const ls = d?.longShort ?? {};
+  const taker = d?.taker ?? {};
   const r = scan?.ranking ?? {};
+  const flowBase = Number(taker?.buyVolume) + Number(taker?.sellVolume);
+  const takerDeltaRatio = Number.isFinite(taker?.delta) && flowBase > 0 ? taker.delta / flowBase : null;
   return [
     `### ${clean(scan?.symbol)}`,
     `Price: ${clean(scan?.price)}`,
@@ -34,7 +39,7 @@ function formatScan(scan) {
     `RSI14: ${clean(s.rsi14)}`,
     `MACD: ${clean(s.macd)}`,
     `ATR14: ${clean(s.atr14)}`,
-    `Volume ratio: ${clean(s.volumeRatio)}x` ,
+    `Volume ratio: ${clean(s.volumeRatio)}x`,
     `BOS: ${clean(s.bos)}`,
     `Retest: ${clean(s.retest)}`,
     `Failed retest: ${clean(s.failedRetest)}`,
@@ -42,12 +47,16 @@ function formatScan(scan) {
     `Support / Resistance: ${clean(s.support)} / ${clean(s.resistance)}`,
     '',
     'DERIVATIVES',
-    `Funding: ${clean(d.funding)}`,
-    `Open interest: ${clean(d.oi)}`,
-    `OI change 1H: ${clean(d.oiChange1h)}%`,
-    `OI change 4H: ${clean(d.oiChange4h)}%`,
-    `Long/Short ratio: ${clean(d.longShortRatio)}`,
-    `Taker delta: ${clean(d.takerDeltaPct)}%`,
+    `Funding: ${clean(d.fundingRate ?? d.funding)}`,
+    `Open interest: ${clean(oi.current)}`,
+    `OI change 1H: ${clean(oi.change1hPct)}%`,
+    `OI change 4H: ${clean(oi.change4hPct)}%`,
+    `Long/Short ratio: ${clean(ls.longShortRatio)}`,
+    `Long account % / Short account %: ${clean(ls.longAccount)} / ${clean(ls.shortAccount)}`,
+    `Taker buy/sell ratio: ${clean(taker.buySellRatio)}`,
+    `Taker delta: ${clean(taker.delta)}`,
+    `Taker delta ratio: ${clean(takerDeltaRatio)}`,
+    `Windowed CVD: ${clean(taker.cvd)}`,
   ].join('\n');
 }
 

@@ -3,7 +3,8 @@ import { useWatchlistMarketData } from './useWatchlistMarketData';
 import { scanSymbol, rankScans } from '../lib/marketScanner';
 
 export function useWatchlistScanner(symbols, signalMode = 'conservative', refreshToken = 0) {
-  const snapshots = useWatchlistMarketData(symbols, '15m', signalMode, refreshToken);
+  const effectiveSymbols = useMemo(() => [...symbols], [symbols, refreshToken]);
+  const snapshots = useWatchlistMarketData(effectiveSymbols, '15m', signalMode);
   const scans = useMemo(() => {
     const rows = Object.values(snapshots).map((snapshot) => {
       const derivatives = { ...snapshot?.derivatives, fundingRate: snapshot?.fundingRate ?? null, funding: snapshot?.fundingRate ?? null };

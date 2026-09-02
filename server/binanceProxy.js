@@ -1,4 +1,15 @@
-export const ALLOWED_BINANCE_ENDPOINTS = new Set(['klines', 'ticker/24hr', 'ticker/price', 'premiumIndex', 'openInterest', 'fundingRate']);
+export const ALLOWED_BINANCE_ENDPOINTS = new Set([
+  'klines',
+  'ticker/24hr',
+  'ticker/price',
+  'premiumIndex',
+  'openInterest',
+  'fundingRate',
+  'openInterestHist',
+  'globalLongShortAccountRatio',
+  'takerlongshortRatio',
+]);
+
 export const ERROR_TYPES = {
   NETWORK_BLOCKED: 'NETWORK_BLOCKED',
   TLS_ERROR: 'TLS_ERROR',
@@ -27,7 +38,6 @@ export function isBlockedHtml(text, contentType = '') {
   return (
     normalized.includes('situs diblokir') ||
     normalized.includes('karena mengandung konten') ||
-    normalized.includes('situs diblokir') ||
     normalized.includes('internetsehat') ||
     normalized.includes('kominfo')
   );
@@ -87,7 +97,6 @@ export async function fetchBinanceEndpoint(endpoint, params, fetcher = fetch) {
     );
   }
 
-  const attempts = [];
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let response;
@@ -101,26 +110,23 @@ export async function fetchBinanceEndpoint(endpoint, params, fetcher = fetch) {
     });
     text = await response.text();
     contentType = response.headers.get('content-type') || 'application/json';
+
     if (isBlockedHtml(text, contentType)) {
-      return errorResult(
-        buildErrorPayload({
-          endpoint,
-          symbol: params?.symbol,
-          errorType: ERROR_TYPES.NETWORK_BLOCKED,
-          message: 'Binance Futures upstream returned blocked HTML instead of market JSON',
-        }),
-      );
+      return errorResult(buildErrorPayload({
+        endpoint,
+        symbol: params?.symbol,
+        errorType: ERROR_TYPES.NETWORK_BLOCKED,
+        message: 'Binance Futures upstream returned blocked HTML instead of market JSON',
+      }));
     }
 
     if (isHtmlResponse(text, contentType)) {
-      return errorResult(
-        buildErrorPayload({
-          endpoint,
-          symbol: params?.symbol,
-          errorType: ERROR_TYPES.UPSTREAM_HTML_RESPONSE,
-          message: 'Binance Futures upstream returned HTML instead of market JSON',
-        }),
-      );
+      return errorResult(buildErrorPayload({
+        endpoint,
+        symbol: params?.symbol,
+        errorType: ERROR_TYPES.UPSTREAM_HTML_RESPONSE,
+        message: 'Binance Futures upstream returned HTML instead of market JSON',
+      }));
     }
   } catch (error) {
     const errorType =
@@ -134,50 +140,31 @@ export async function fetchBinanceEndpoint(endpoint, params, fetcher = fetch) {
         ? `Binance Futures request timed out after ${FETCH_TIMEOUT_MS / 1000}s`
         : `Binance Futures request failed: ${error.message}`;
 
-    return errorResult(
-      buildErrorPayload({
-        endpoint,
-        symbol: params?.symbol,
-        errorType,
-        message,
-      }),
-    );
+    return errorResult(buildErrorPayload({ endpoint, symbol: params?.symbol, errorType, message }));
   } finally {
     clearTimeout(timeoutId);
   }
 
-  attempts.push({ upstream: FUTURES_API_BASE_URL, status: response.status });
-
   if (response.status === 429) {
-    return errorResult(
-      buildErrorPayload({
-        endpoint,
-        symbol: params?.symbol,
-        errorType: ERROR_TYPES.RATE_LIMITED,
-        message: 'Binance Futures rate limit reached',
-      }),
-      429,
-    );
+    return errorResult(buildErrorPayload({
+      endpoint,
+      symbol: params?.symbol,
+      errorType: ERROR_TYPES.RATE_LIMITED,
+      message: 'Binance Futures rate limit reached',
+    }), 429);
   }
 
   if (response.ok || !shouldTryNextUpstream(response.status)) {
-    return {
-      status: response.status,
-      contentType,
-      text,
-      upstream: FUTURES_API_BASE_URL,
-    };
+    return { status: response.status, contentType, text, upstream: FUTURES_API_BASE_URL };
   }
 
-  return errorResult(
-    buildErrorPayload({
-      endpoint,
-      symbol: params?.symbol,
-      errorType: ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-      message: 'All Binance upstreams rejected the request',
-      upstream: null,
-    }),
-  );
+  return errorResult(buildErrorPayload({
+    endpoint,
+    symbol: params?.symbol,
+    errorType: ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
+    message: 'All Binance upstreams rejected the request',
+    upstream: null,
+  }));
 }
 
 export async function fetchBinanceFunding(symbol, fetcher = fetch) {
@@ -189,22 +176,11 @@ export async function fetchBinanceOpenInterest(symbol, fetcher = fetch) {
 }
 
 export async function fetchBinanceBatchPrices(symbols, fetcher = fetch) {
-  return Promise.all(
-    symbols.map(async (symbol) => {
-      const result = await fetchBinanceEndpoint('ticker/price', { symbol }, fetcher);
-
-      if (result.status < 200 || result.status >= 300) {
-        return {
-          symbol,
-          error: `HTTP ${result.status}`,
-          upstream: result.upstream,
-        };
-      }
-
-      return {
-        ...JSON.parse(result.text),
-        upstream: result.upstream,
-      };
-    }),
-  );
+  return Promise.all(symbols.map(async (symbol) => {
+    const result = await fetchBinanceEndpoint('ticker/price', { symbol }, fetcher);
+    if (result.status < 200 || result.status >= 300) {
+      return { symbol, error: `HTTP ${result.status}`, upstream: result.upstream };
+    }
+    return { ...JSON.parse(result.text), upstream: result.upstream };
+  }));
 }

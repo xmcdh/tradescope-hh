@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useWatchlistScanner } from '../hooks/useWatchlistScanner';
 import { buildBatchAIPrompt } from '../lib/formatBatchAIPrompt';
+import { buildAIPrompt } from '../lib/formatAIPrompt';
 import { DEFAULT_SYMBOLS, WATCHLIST_STORAGE_KEY, normalizeSymbol } from '../lib/marketData';
 
 function loadWatchlist() {
@@ -18,14 +19,22 @@ export default function ScannerDashboard() {
   const [mode, setMode] = useState('all');
   const [input, setInput] = useState('');
   const [copied, setCopied] = useState(false);
+  const [copiedSymbol, setCopiedSymbol] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
+  const [selected, setSelected] = useState(null);
   const { scans } = useWatchlistScanner(symbols, 'conservative', refreshToken);
+
   const filtered = useMemo(() => scans.filter((scan) => mode === '4h' ? scan.htf?.trend !== 'NEUTRAL' : mode === '15m' ? scan.setup?.trend !== 'NEUTRAL' : true), [mode, scans]);
+  const selectedScan = selected ? scans.find((scan) => scan.symbol === selected) : null;
   const lastDataAt = useMemo(() => { const times = scans.map((scan) => scan.updatedAt).filter(Boolean); return times.length ? new Date(Math.max(...times)).toLocaleTimeString() : '--'; }, [scans]);
 
   async function copyAll() {
     const text = buildBatchAIPrompt(filtered, { mode, timestamp: new Date().toISOString() });
     await navigator.clipboard.writeText(text); setCopied(true); window.setTimeout(() => setCopied(false), 1600);
+  }
+  async function copyOne(scan) {
+    await navigator.clipboard.writeText(buildAIPrompt(scan.marketSnapshot ?? scan, { mode }));
+    setCopiedSymbol(scan.symbol); window.setTimeout(() => setCopiedSymbol(''), 1600);
   }
   function addSymbol() {
     const symbol = normalizeSymbol(input); if (!symbol || symbols.includes(symbol)) return;
@@ -33,7 +42,7 @@ export default function ScannerDashboard() {
   }
   function removeSymbol(symbol) {
     const next = symbols.filter((item) => item !== symbol); const saved = next.length ? next : DEFAULT_SYMBOLS;
-    setSymbols(saved); window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(saved));
+    setSymbols(saved); window.localStorage.setItem(WATCHLIST_STORAGE_KEY, JSON.stringify(saved)); if (selected === symbol) setSelected(null);
   }
 
   return (
@@ -41,7 +50,7 @@ export default function ScannerDashboard() {
       <div className="mx-auto max-w-7xl space-y-4">
         <header className="rounded-2xl border border-zinc-800 bg-zinc-950/90 p-4 shadow-2xl md:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div><div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">BINANCE FUTURES</div><h1 className="mt-1 text-2xl font-bold tracking-tight">交易机会排行</h1><p className="mt-1 text-xs text-zinc-500">程序只负责客观数据与排序，最终交易判断交给 AI 和你。</p></div>
+            <div><div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">BINANCE FUTURES</div><h1 className="mt-1 text-2xl font-bold tracking-tight">交易机会排行</h1><p className="mt-1 text-xs text-zinc-500">客观数据 → 排名 → AI独立判断。程序不自动下单，也不把评分伪装成交易信号。</p></div>
             <div className="flex flex-wrap gap-2">
               {[['all', '全部'], ['4h', '4H短线'], ['15m', '15M超短线']].map(([value, label]) => <button key={value} type="button" onClick={() => setMode(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${mode === value ? 'border-indigo-400 bg-indigo-500 text-white' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}`}>{label}</button>)}
               <button type="button" onClick={() => setRefreshToken((value) => value + 1)} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300">立即刷新</button>
@@ -53,9 +62,12 @@ export default function ScannerDashboard() {
           <div className="flex items-center gap-2 text-xs text-zinc-400"><span className="h-2 w-2 rounded-full bg-emerald-400" />实时行情约10秒更新 · 技术/衍生品约2分钟更新 · 数据 {lastDataAt}</div>
           <div className="flex gap-2"><input value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && addSymbol()} placeholder="添加币种，例如 HYPE" className="w-40 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs outline-none placeholder:text-zinc-600" /><button type="button" onClick={addSymbol} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300">添加</button></div>
         </section>
-        <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80"><div className="overflow-x-auto"><table className="min-w-[900px] w-full text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-600"><tr><th className="px-4 py-3">#</th><th className="px-4 py-3">币种</th><th className="px-4 py-3">评分</th><th className="px-4 py-3">方向</th><th className="px-4 py-3">4H</th><th className="px-4 py-3">15M</th><th className="px-4 py-3">OI Δ1H</th><th className="px-4 py-3">Taker</th><th className="px-4 py-3">状态</th><th className="px-4 py-3">操作</th></tr></thead><tbody>
-          {filtered.map((scan) => { const oi = scan.derivatives?.openInterest ?? {}; const taker = scan.derivatives?.taker ?? {}; return <tr key={scan.symbol} className="border-b border-zinc-900 hover:bg-zinc-900/70"><td className="px-4 py-3 font-mono text-zinc-600">{scan.ranking.rank}</td><td className="px-4 py-3"><div className="font-bold">{scan.symbol.replace('USDT', '')}</div><div className="font-mono text-[10px] text-zinc-600">${fmt(scan.price, 6)}</div></td><td className={`px-4 py-3 font-mono text-base font-bold ${qualityTone(scan.ranking.score)}`}>{scan.ranking.score}</td><td className={`px-4 py-3 font-semibold ${trendTone(scan.ranking.direction)}`}>{scan.ranking.direction === 'BULLISH' ? '↑ 做多偏向' : scan.ranking.direction === 'BEARISH' ? '↓ 做空偏向' : '→ 中性'}</td><td className={`px-4 py-3 font-semibold ${trendTone(scan.htf.trend)}`}>{scan.htf.trend}</td><td className={`px-4 py-3 font-semibold ${trendTone(scan.setup.trend)}`}>{scan.setup.trend}</td><td className="px-4 py-3 font-mono text-zinc-300">{fmt(oi.change1hPct)}%</td><td className="px-4 py-3 font-mono text-zinc-300">{fmt(taker.buySellRatio)}</td><td className="px-4 py-3">{scan.dataQuality === 'GOOD' ? <span className="text-emerald-400">正常</span> : <span className="text-orange-300">{scan.dataQuality}</span>}</td><td className="px-4 py-3"><button type="button" onClick={() => removeSymbol(scan.symbol)} className="text-zinc-600 hover:text-red-400">移除</button></td></tr>; })}
+        <section className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/80"><div className="overflow-x-auto"><table className="min-w-[1040px] w-full text-left text-xs"><thead className="border-b border-zinc-800 text-[10px] uppercase tracking-wider text-zinc-600"><tr><th className="px-4 py-3">#</th><th className="px-4 py-3">币种</th><th className="px-4 py-3">评分</th><th className="px-4 py-3">方向</th><th className="px-4 py-3">4H</th><th className="px-4 py-3">15M</th><th className="px-4 py-3">OI Δ1H</th><th className="px-4 py-3">Taker</th><th className="px-4 py-3">状态</th><th className="px-4 py-3">操作</th></tr></thead><tbody>
+          {filtered.map((scan) => { const oi = scan.derivatives?.openInterest ?? {}; const taker = scan.derivatives?.taker ?? {}; return <tr key={scan.symbol} className="border-b border-zinc-900 hover:bg-zinc-900/70"><td className="px-4 py-3 font-mono text-zinc-600">{scan.ranking.rank}</td><td className="px-4 py-3"><button type="button" onClick={() => setSelected(scan.symbol)} className="text-left"><div className="font-bold hover:text-indigo-300">{scan.symbol.replace('USDT', '')}</div><div className="font-mono text-[10px] text-zinc-600">${fmt(scan.price, 6)}</div></button></td><td className={`px-4 py-3 font-mono text-base font-bold ${qualityTone(scan.ranking.score)}`}>{scan.ranking.score}</td><td className={`px-4 py-3 font-semibold ${trendTone(scan.ranking.direction)}`}>{scan.ranking.direction === 'BULLISH' ? '↑ 做多偏向' : scan.ranking.direction === 'BEARISH' ? '↓ 做空偏向' : '→ 中性'}</td><td className={`px-4 py-3 font-semibold ${trendTone(scan.htf.trend)}`}>{scan.htf.trend}</td><td className={`px-4 py-3 font-semibold ${trendTone(scan.setup.trend)}`}>{scan.setup.trend}</td><td className="px-4 py-3 font-mono text-zinc-300">{fmt(oi.change1hPct)}%</td><td className="px-4 py-3 font-mono text-zinc-300">{fmt(taker.buySellRatio)}</td><td className="px-4 py-3">{scan.dataQuality === 'GOOD' ? <span className="text-emerald-400">正常</span> : <span className="text-orange-300">{scan.dataQuality}</span>}</td><td className="px-4 py-3"><button type="button" onClick={() => copyOne(scan)} className="mr-3 text-indigo-300">{copiedSymbol === scan.symbol ? '已复制' : '复制AI'}</button><button type="button" onClick={() => removeSymbol(scan.symbol)} className="text-zinc-600 hover:text-red-400">移除</button></td></tr>; })}
         </tbody></table></div></section>
+
+        {selectedScan && <section className="rounded-2xl border border-zinc-800 bg-zinc-950/90 p-4"><div className="flex items-center justify-between"><div><div className="text-lg font-bold">{selectedScan.symbol.replace('USDT', '')} 详细数据</div><div className="text-xs text-zinc-600">价格 ${fmt(selectedScan.price, 6)} · 评分 {selectedScan.ranking.score}/100</div></div><button type="button" onClick={() => setSelected(null)} className="text-zinc-500">关闭</button></div><div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4"><div className="rounded-xl bg-zinc-900 p-3"><div className="text-[10px] text-zinc-600">4H结构</div><div className={trendTone(selectedScan.htf.trend)}>{selectedScan.htf.trend} · {selectedScan.htf.structure}</div><div className="mt-2 text-xs text-zinc-400">EMA20/50/200 {fmt(selectedScan.htf.ema20, 4)} / {fmt(selectedScan.htf.ema50, 4)} / {fmt(selectedScan.htf.ema200, 4)}</div></div><div className="rounded-xl bg-zinc-900 p-3"><div className="text-[10px] text-zinc-600">15M结构</div><div className={trendTone(selectedScan.setup.trend)}>{selectedScan.setup.trend} · {selectedScan.setup.structure}</div><div className="mt-2 text-xs text-zinc-400">BOS {selectedScan.setup.bos?.direction ?? '--'} · Retest {selectedScan.setup.retest?.complete ? '完成' : '--'}</div></div><div className="rounded-xl bg-zinc-900 p-3"><div className="text-[10px] text-zinc-600">衍生品</div><div className="text-xs text-zinc-300">OI Δ1H {fmt(selectedScan.derivatives?.openInterest?.change1hPct)}%</div><div className="text-xs text-zinc-400">OI Δ4H {fmt(selectedScan.derivatives?.openInterest?.change4hPct)}% · L/S {fmt(selectedScan.derivatives?.longShort?.longShortRatio)}</div><div className="text-xs text-zinc-400">Taker {fmt(selectedScan.derivatives?.taker?.buySellRatio)}</div></div><div className="rounded-xl bg-zinc-900 p-3"><div className="text-[10px] text-zinc-600">关键位置</div><div className="text-xs text-zinc-300">4H 支撑 {fmt(selectedScan.htf.support, 6)}</div><div className="text-xs text-zinc-300">4H 阻力 {fmt(selectedScan.htf.resistance, 6)}</div><div className="text-xs text-zinc-400">15M 成交量 {fmt(selectedScan.setup.volumeRatio, 2)}x</div></div></div><button type="button" onClick={() => copyOne(selectedScan)} className="mt-3 rounded-lg border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-xs font-semibold text-emerald-300">复制此币完整AI数据</button></section>}
+
         <section className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-4 text-xs text-zinc-500"><div className="font-semibold text-zinc-300">评分组成</div><div className="mt-2 grid gap-2 md:grid-cols-3"><div>4H趋势 20 · 4H结构 15</div><div>15M结构 20 · 动量 10 · 成交量 10</div><div>OI 8 · Taker/CVD 7 · Funding 5 · BTC 5</div></div><div className="mt-2">评分仅用于排序，不直接产生下单信号。数据缺失时标记 PARTIAL/INVALID，AI 导出不会补造数据。</div></section>
       </div>
     </main>

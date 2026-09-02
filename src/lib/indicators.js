@@ -200,9 +200,9 @@ function detectBos(candles, swingHighPoints, swingLowPoints) {
 }
 
 function detectRetest(candles, bos) {
-  if (!bos.detected || !Number.isFinite(bos.level) || !Number.isInteger(bos.candlesAgo)) return { retest: { detected: false, complete: false, level: null, candlesAgo: null }, failedRetest: { detected: false, level: null, candlesAgo: null } };
+  if (!bos.detected || bos.candlesAgo > 6 || !Number.isFinite(bos.level) || !Number.isInteger(bos.candlesAgo)) return { retest: { detected: false, complete: false, level: null, candlesAgo: null }, failedRetest: { detected: false, level: null, candlesAgo: null } };
   const breakIndex = candles.length - 1 - bos.candlesAgo;
-  const afterBreak = candles.slice(breakIndex + 1, breakIndex + 1 + 6);
+  const afterBreak = candles.slice(breakIndex + 1, Math.min(candles.length, breakIndex + 1 + 6));
   let touched = false;
   let complete = false;
   let failed = false;
@@ -231,8 +231,8 @@ function detectLiquiditySweep(candles, swingHighPoints, swingLowPoints) {
   const scanStart = Math.max(0, candles.length - 8);
   for (let index = candles.length - 1; index >= scanStart; index -= 1) {
     const candle = candles[index];
-    const priorHigh = swingHighPoints.filter((point) => point.index < index).at(-1);
-    const priorLow = swingLowPoints.filter((point) => point.index < index).at(-1);
+    const priorHigh = swingHighPoints.filter((point) => point.index < index && index - point.index <= 12).at(-1);
+    const priorLow = swingLowPoints.filter((point) => point.index < index && index - point.index <= 12).at(-1);
     if (priorLow && candle.low < priorLow.price && candle.close > priorLow.price) return { detected: true, direction: 'bullish', level: priorLow.price, candlesAgo: candles.length - 1 - index, reclaimed: true };
     if (priorHigh && candle.high > priorHigh.price && candle.close < priorHigh.price) return { detected: true, direction: 'bearish', level: priorHigh.price, candlesAgo: candles.length - 1 - index, reclaimed: true };
   }
@@ -301,7 +301,9 @@ export function calculateIndicators(candles, timeframe = '15m') {
   const ema200 = ema200Valid ? tailValue(ema200Series.map((item) => item.value)) : null;
   const rsi = tailValue(RSI.calculate({ period: 14, values: closes }));
   const atr = calculateAtr(closedCandles, 14);
-  const marketStructure = analyzeMarketStructure(closedCandles);
+  // analyzeMarketStructure() owns the open-candle exclusion. Pass the original series
+  // here so we do not accidentally exclude two candles from structure analysis.
+  const marketStructure = analyzeMarketStructure(candles);
   const macdSeries = MACD.calculate({ values: closes, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
   const macd = macdSeries.length ? macdSeries.at(-1) : null;
   const recentWindow = closedCandles.slice(-20);

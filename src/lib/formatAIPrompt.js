@@ -1,157 +1,91 @@
-import { formatPrice } from './indicators';
-
-function lineValue(label, value) {
-  return `${label}: ${value}`;
+function value(v, fallback = 'N/A') {
+  return v == null || v === '' || (typeof v === 'number' && !Number.isFinite(v)) ? fallback : String(v);
 }
-
-function macdValue(macd) {
-  if (!macd) {
-    return 'data unavailable';
-  }
-
-  return `${Number(macd.MACD).toFixed(6)} / signal ${Number(macd.signal).toFixed(6)}`;
+function fixed(v, digits = 4) {
+  return v == null || !Number.isFinite(Number(v)) ? 'N/A' : Number(v).toFixed(digits);
 }
-
-function scoreBreakdown(setup) {
-  const technical = (setup.scoreBreakdown?.items ?? [])
-    .map((item) => `- ${item.label}: +${item.points}/${item.max} (${item.reason})`)
-    .join('\n');
-  const adjustments = (setup.scoreBreakdown?.adjustments ?? [])
-    .map((item) => `- ${item.label}: ${item.points > 0 ? '+' : ''}${item.points} (${item.reason})`)
-    .join('\n');
-
-  return [technical, adjustments ? 'Adjustments:' : '', adjustments].filter(Boolean).join('\n');
+function pct(v, digits = 2) {
+  return v == null || !Number.isFinite(Number(v)) ? 'N/A' : `${Number(v).toFixed(digits)}%`;
 }
-
-function rrLine(setup) {
-  return `TP1 ${Number.isFinite(setup.rrTp1) ? setup.rrTp1.toFixed(2) : '--'}, TP2 ${
-    Number.isFinite(setup.rrTp2) ? setup.rrTp2.toFixed(2) : '--'
-  }`;
-}
-
-function commonData({ symbol, exchange, timeframe, indicators, setup, mode }) {
+function directionBlock(title, data) {
   return [
-    lineValue('Pair', `${symbol}/USDT (${exchange} ${mode === 'polling' ? 'Polling via proxy' : mode})`),
-    lineValue('Timeframe', timeframe),
-    lineValue('Harga', formatPrice(indicators.price)),
-    lineValue('EMA20', formatPrice(indicators.ema20)),
-    lineValue('EMA50', formatPrice(indicators.ema50)),
-    lineValue('EMA200', formatPrice(indicators.ema200)),
-    lineValue('RSI', Number.isFinite(indicators.rsi) ? indicators.rsi.toFixed(1) : '-'),
-    lineValue('MACD', macdValue(indicators.macd)),
-    lineValue('Histogram', Number.isFinite(indicators.macd?.histogram) ? indicators.macd.histogram.toFixed(6) : '-'),
-    lineValue('Volume', `${indicators.currentVolume ?? '-'} / avg20 ${indicators.averageVolume ?? '-'}`),
-    lineValue('ATR', formatPrice(indicators.atr)),
-    lineValue('Support', formatPrice(indicators.support)),
-    lineValue('Resistance', formatPrice(indicators.resistance)),
-    lineValue('Funding rate', Number.isFinite(setup.fundingRate) ? `${(setup.fundingRate * 100).toFixed(4)}%` : '-'),
-    lineValue('Open interest', Number.isFinite(setup.openInterest) ? setup.openInterest : '-'),
-    lineValue('BTC confirmation', `${setup.btcBias ?? '-'} (${setup.btcAdjustment ?? 0})`),
-    lineValue('Market regime', setup.marketRegime ?? '-'),
-    'Score breakdown:',
-    scoreBreakdown(setup),
+    title,
+    `Trend: ${value(data?.trend)}`,
+    `Structure: ${value(data?.structure)}`,
+    `EMA20 / EMA50 / EMA200: ${fixed(data?.ema20)} / ${fixed(data?.ema50)} / ${fixed(data?.ema200)}`,
+    `RSI14: ${fixed(data?.rsi14, 1)}`,
+    `MACD: ${data?.macd ? `MACD ${fixed(data.macd.MACD, 6)}, signal ${fixed(data.macd.signal, 6)}, histogram ${fixed(data.macd.histogram, 6)}` : 'N/A'}`,
+    `ATR14: ${fixed(data?.atr14)}`,
+    `Support / Resistance: ${fixed(data?.support)} / ${fixed(data?.resistance)}`,
+    `BOS: ${data?.bos ? value(data.bos.direction) : 'N/A'}`,
+  ].join('\n');
+}
+function derivativesBlock(d = {}) {
+  const oi = d.openInterest ?? {};
+  const taker = d.taker ?? {};
+  return [
+    'Derivatives',
+    `Funding: ${value(d.funding ?? d.fundingRate)}`,
+    `Open Interest: ${value(oi.current ?? d.openInterest)}`,
+    `OI Δ1H / Δ4H: ${pct(oi.change1hPct ?? d.oiChange1h)} / ${pct(oi.change4hPct ?? d.oiChange4h)}`,
+    `Long/Short ratio: ${value(d.longShortRatio ?? d.longShort?.ratio)}`,
+    `Taker buy / sell: ${value(taker.buyVolume)} / ${value(taker.sellVolume)}`,
+    `Taker delta / CVD: ${value(taker.delta ?? d.takerDelta)} / ${value(taker.cvd)}`,
+  ].join('\n');
+}
+function setupBlock(setup) {
+  return [
+    directionBlock('15M Ultra-short-term Setup', setup),
+    `Volume ratio: ${setup?.volumeRatio == null ? 'N/A' : `${Number(setup.volumeRatio).toFixed(2)}x`}`,
+    `Retest: ${setup?.retest?.complete ? 'CONFIRMED' : setup?.retest ? 'DETECTED' : 'N/A'}`,
+    `Liquidity sweep: ${setup?.liquiditySweep?.detected ? 'DETECTED' : 'N/A'}`,
+    `Failed retest: ${setup?.failedRetest?.detected ? 'YES' : 'NO'}`,
+  ].join('\n');
+}
+function buildPrompt(scan, mode = 'all') {
+  const ranking = scan?.ranking ?? {};
+  const selected = mode === '4h' ? ranking.score4h : mode === '15m' ? ranking.score15m : ranking.score;
+  const focus = mode === '4h' ? '4H短线' : mode === '15m' ? '15M超短线' : '综合';
+  return [
+    '你是独立的加密永续合约交易分析员。以下数据来自程序化市场扫描器。',
+    '程序评分只用于排序辅助，不是交易信号。必须根据原始数据独立判断，不得为了给出交易而强行给 LONG/SHORT。',
+    '数据缺失、过期、矛盾或结构不成立时，明确给出 WAIT 或 NO_TRADE。不要编造任何缺失数据。',
+    '',
+    `分析重点: ${focus}`,
+    `Symbol: ${value(scan?.symbol)}`,
+    `Price: ${value(scan?.price)}`,
+    `Selected scanner score: ${value(selected)}/100`,
+    `4H scanner score: ${value(ranking.score4h)}/100`,
+    `15M scanner score: ${value(ranking.score15m)}/100`,
+    `Scanner direction: ${value(ranking.direction)}`,
+    `Data quality: ${value(scan?.dataQuality)}`,
+    '',
+    directionBlock('4H Short-term Context', scan?.htf),
+    '',
+    setupBlock(scan?.setup),
+    '',
+    derivativesBlock(scan?.derivatives),
+    '',
+    `BTC context: ${scan?.btcContext ? JSON.stringify(scan.btcContext) : 'N/A'}`,
+    '',
+    '请输出：',
+    '1. LONG / SHORT / WAIT / NO_TRADE',
+    '2. 选择 4H短线 或 15M超短线，并说明为什么',
+    '3. 当前结构：趋势、HH/HL或LH/LL、BOS、回踩、流动性扫单、reclaim',
+    '4. 多空双方最关键的证据，分别列出',
+    '5. 是否追价，还是等待回踩/确认',
+    '6. 如果可以交易，给出合理的入场区域、止损失效位、TP1、TP2和估算RR。没有足够依据就不要编造价格',
+    '7. 最大风险和最重要的NO_TRADE条件',
+    '8. 最终置信度：HIGH / MEDIUM / LOW',
+    '',
+    '对于15M超短线，优先关注最近结构、BOS/retest/sweep/reclaim、成交量、taker flow和OI变化。',
+    '对于4H短线，优先关注4H趋势、结构、EMA排列、动量、关键支撑阻力，再用15M作为入场时机参考。',
+    '这是人工交易辅助分析，不执行任何自动下单。',
+    '回答简洁、客观、可执行，不要重复数据表。',
   ].join('\n');
 }
 
-function tradePrompt(args) {
-  const { setup } = args;
-
-  return [
-    'Analisis setup futures berikut secara objektif.',
-    'Jangan memaksakan sinyal.',
-    'Jika setup lemah, jawab WAIT atau NO_TRADE.',
-    '',
-    'Data:',
-    commonData(args),
-    lineValue('Entry', formatPrice(setup.entry1)),
-    lineValue('SL', formatPrice(setup.sl)),
-    lineValue('TP1', formatPrice(setup.tp1)),
-    lineValue('TP2', formatPrice(setup.tp2)),
-    lineValue('RR', rrLine(setup)),
-    '',
-    'Setup terdeteksi:',
-    lineValue('Type', setup.signal),
-    lineValue('Confidence', setup.confidence?.label ?? '-'),
-    lineValue('Score', `${setup.score}/${setup.scoreMax ?? 10}`),
-    '',
-    'Tolong jawab:',
-    '1. Apakah setup valid?',
-    '2. Apakah entry terlalu telat?',
-    '3. Apakah RR layak?',
-    '4. Apa risiko invalidasi?',
-    '5. Entry mana yang paling aman?',
-    '6. Apakah lebih baik entry sekarang, tunggu retest, atau NO_TRADE?',
-    '7. Saran manajemen posisi.',
-    '',
-    'Gunakan jawaban singkat, objektif, konservatif.',
-  ].join('\n');
-}
-
-function noTradePrompt(args) {
-  const { setup } = args;
-  const rejectionReasons = setup.rejectionReasons?.length
-    ? setup.rejectionReasons.map((item) => `- ${item}`).join('\n')
-    : '- No clear technical edge';
-
-  return [
-    'Analisis kondisi market berikut.',
-    `Sistem mendeteksi ${setup.signal === 'AVOID' ? 'AVOID' : 'NO_TRADE'}.`,
-    'Jangan membuat sinyal entry kecuali ada alasan teknikal yang sangat kuat.',
-    '',
-    'Data:',
-    commonData(args),
-    'Rejection reasons:',
-    rejectionReasons,
-    '',
-    'Tolong jawab:',
-    '1. Apakah NO_TRADE ini sudah tepat?',
-    '2. Faktor utama yang membuat setup tidak valid?',
-    '3. Level apa yang harus ditunggu agar setup berubah menjadi LONG atau SHORT?',
-    '4. Apa kondisi konfirmasi yang dibutuhkan?',
-    '5. Risiko jika memaksakan entry sekarang?',
-    '',
-    'Jawab singkat, objektif, dan konservatif.',
-  ].join('\n');
-}
-
-function waitPrompt(args) {
-  const { setup } = args;
-  const watch = setup.watchLevels ?? {};
-
-  return [
-    'Analisis kondisi futures berikut.',
-    `Sistem mendeteksi ${setup.signal}.`,
-    'Jangan memberi entry eksekusi sebelum konfirmasi candle close/retest valid.',
-    '',
-    'Data:',
-    commonData(args),
-    lineValue('Watch breakout level', formatPrice(watch.breakoutLevel)),
-    lineValue('Watch retest area', formatPrice(watch.retestArea)),
-    lineValue('Watch invalidation', formatPrice(watch.invalidation)),
-    '',
-    'Tolong jawab:',
-    '1. Apakah WAIT ini konservatif dan tepat?',
-    '2. Konfirmasi apa yang dibutuhkan agar setup valid?',
-    '3. Level mana yang harus diawasi?',
-    '4. Apa risiko jika entry sekarang?',
-    '5. Apakah lebih baik tunggu retest atau NO_TRADE?',
-    '',
-    'Jawab singkat, objektif, dan konservatif.',
-  ].join('\n');
-}
-
-export function buildAIPrompt(args) {
-  if (!args.indicators || !args.setup) {
-    return '';
-  }
-
-  if (['LONG', 'SHORT'].includes(args.setup.signal)) {
-    return tradePrompt(args);
-  }
-
-  if (['WAIT', 'WAIT_RETEST'].includes(args.setup.signal)) {
-    return waitPrompt(args);
-  }
-
-  return noTradePrompt(args);
+export function buildAIPrompt(scan, options = {}) {
+  if (!scan?.htf && !scan?.setup) return '';
+  return buildPrompt(scan, options.mode ?? 'all');
 }

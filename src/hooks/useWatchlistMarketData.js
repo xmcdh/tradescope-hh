@@ -19,161 +19,54 @@ import {
   TIMEFRAME,
   normalizeTimeframe,
 } from '../lib/marketData';
+import {
+  buildDerivativeSnapshot,
+  fetchBinanceGlobalLongShortRatio,
+  fetchBinanceOpenInterestHistory,
+  fetchBinanceTakerLongShort,
+} from '../lib/binanceDerivatives';
 import { buildSignalSetup } from '../lib/signalLogic';
+
+const SETUP_TIMEFRAME = '15m';
+const CONTEXT_TIMEFRAME = '4h';
+const DERIVATIVE_POLL_MS = 2 * 60 * 1000;
+const DERIVATIVE_LIMIT = 8;
+const OI_LIMIT = 8;
 
 function buildAvoidSetup(indicators, meta) {
   return {
-    signal: 'AVOID',
-    marketRegime: 'AVOID',
-    trend: 'NEUTRAL',
-    longScore: 0,
-    shortScore: 0,
-    score: 0,
-    confidenceScore: 0,
-    scoreMax: 10,
-    signalValidity: 'MARGINAL',
-    confidence: { label: 'LOW' },
-    scoreBreakdown: {
-      total: 0,
-      max: 10,
-      breakdown: {
-        trend: 0,
-        rsiMomentum: 0,
-        macd: 0,
-        volume: 0,
-        levelLong: 0,
-        levelShort: 0,
-        rsiFilter: 0,
-        rrRatio: 0,
-        candleStructure: 0,
-        marketStructure: 0,
-      },
-      rawTotal: 0,
-      technicalTotal: 0,
-      btcAdjustment: 0,
-      fundingOiAdjustment: 0,
-      adjustmentTotal: 0,
-      status: 'AVOID',
-      items: [],
-      adjustments: [],
-      hardBlock: AVOID_PAIR_REASON,
-      warnings: [AVOID_PAIR_REASON],
-    },
-    candidates: null,
-    hardBlock: AVOID_PAIR_REASON,
-    rrWarning: null,
-    levelWarning: null,
-    warnings: [AVOID_PAIR_REASON],
-    stale: Boolean(indicators?.stale),
-    lastUpdate: indicators?.lastUpdate ?? null,
-    blockedReason: [],
-    dataValid: true,
-    invalidReason: null,
-    btcBias: null,
-    btcRSI: null,
-    btcConfirmation: false,
-    btcNote: null,
-    marketStructure: null,
-    entryContext: 'AVOID',
-    entryAdvice: AVOID_PAIR_REASON,
-    rejectionReasons: [AVOID_PAIR_REASON],
-    action: 'No entry recommended. Pair is blacklisted for this dashboard.',
-    watchLevels: null,
-    tradeLevelsVisible: false,
-    rr: null,
-    rrRatio: null,
-    atr: null,
-    layers: {},
-    basis: [],
-    entry1: null,
-    entry2: null,
-    tp1: null,
-    tp2: null,
-    sl: null,
-    tp1Price: null,
-    tp2Price: null,
-    slPrice: null,
-    watchlistStatus: meta.status,
-    watchlistTier: meta.tier,
+    signal: 'AVOID', marketRegime: 'AVOID', trend: 'NEUTRAL', longScore: 0, shortScore: 0,
+    score: 0, confidenceScore: 0, scoreMax: 10, signalValidity: 'MARGINAL', confidence: { label: 'LOW' },
+    scoreBreakdown: { total: 0, max: 10, breakdown: {}, rawTotal: 0, technicalTotal: 0, btcAdjustment: 0,
+      fundingOiAdjustment: 0, adjustmentTotal: 0, status: 'AVOID', items: [], adjustments: [],
+      hardBlock: AVOID_PAIR_REASON, warnings: [AVOID_PAIR_REASON] },
+    candidates: null, hardBlock: AVOID_PAIR_REASON, warnings: [AVOID_PAIR_REASON], stale: Boolean(indicators?.stale),
+    lastUpdate: indicators?.lastUpdate ?? null, blockedReason: [], dataValid: true, invalidReason: null,
+    btcBias: null, btcRSI: null, btcConfirmation: false, btcNote: null, marketStructure: null,
+    entryContext: 'AVOID', entryAdvice: AVOID_PAIR_REASON, rejectionReasons: [AVOID_PAIR_REASON],
+    action: 'No entry recommended. Pair is blacklisted for this dashboard.', watchLevels: null,
+    tradeLevelsVisible: false, rr: null, rrRatio: null, atr: null, layers: {}, basis: [], entry1: null,
+    entry2: null, tp1: null, tp2: null, sl: null, tp1Price: null, tp2Price: null, slPrice: null,
+    watchlistStatus: meta.status, watchlistTier: meta.tier,
   };
 }
 
 function buildUnavailableSetup(snapshot, indicators) {
   const blocked = snapshot.errorType === MARKET_ERROR_TYPES.NETWORK_BLOCKED;
-  const priceOnly = snapshot.dataQuality === 'PRICE_ONLY';
-  const reason = blocked
-    ? 'Market data blocked by current network'
-    : priceOnly
-      ? 'Insufficient futures candle data. Price-only fallback cannot generate futures signals.'
-      : snapshot.error || 'Market data unavailable';
-
+  const reason = blocked ? 'Market data blocked by current network' : snapshot.dataQuality === 'PRICE_ONLY'
+    ? 'Insufficient futures candle data. Price-only fallback cannot generate futures signals.'
+    : snapshot.error || 'Market data unavailable';
   return {
-    signal: 'NO_TRADE',
-    marketRegime: blocked ? 'MARKET_DATA_BLOCKED' : 'DATA_UNAVAILABLE',
-    trend: 'NEUTRAL',
-    longScore: 0,
-    shortScore: 0,
-    score: 0,
-    confidenceScore: 0,
-    scoreMax: 10,
-    signalValidity: 'BLOCKED',
-    confidence: { label: 'LOW' },
-    scoreBreakdown: {
-      total: 0,
-      max: 10,
-      technicalTotal: 0,
-      adjustmentTotal: 0,
-      breakdown: {},
-      items: [],
-      adjustments: [
-        { key: 'btc', label: 'BTC Confirmation', points: 0, max: 1, passed: false, reason: 'Disabled without fresh futures candles.' },
-        { key: 'fundingOi', label: 'Funding/OI', points: 0, max: 1, passed: false, reason: 'Disabled without fresh futures candles.' },
-      ],
-      rawTotal: 0,
-      btcAdjustment: 0,
-      fundingOiAdjustment: 0,
-      status: 'NO_TRADE',
-      hardBlock: reason,
-      warnings: [reason],
-    },
-    warnings: [
-      reason,
-      blocked ? 'Binance/Bybit did not return valid futures JSON.' : null,
-      'Signal generation disabled for safety.',
-    ].filter(Boolean),
-    blockedReason: [
-      reason,
-      blocked ? 'Binance/Bybit did not return valid futures JSON.' : null,
-      'Signal generation disabled for safety.',
-    ].filter(Boolean),
-    rejectionReasons: [
-      reason,
-      blocked ? 'Binance/Bybit did not return valid futures JSON.' : null,
-      'Signal generation disabled for safety.',
-    ].filter(Boolean),
-    hardBlock: reason,
-    stale: true,
-    dataValid: false,
-    invalidReason: snapshot.errorType ?? 'market_data_unavailable',
-    entryContext: 'NO_TRADE',
-    entryAdvice: 'No entry recommended.',
-    action: blocked
-      ? 'Try another network or deploy proxy to cloud. Do not trade from stale data.'
-      : 'Wait until fresh futures candle data is restored.',
-    tradeLevelsVisible: false,
-    watchLevels: null,
-    rr: null,
-    rrRatio: null,
-    rrTp1: null,
-    rrTp2: null,
-    atr: indicators?.atr ?? null,
-    basis: [],
-    entry1: null,
-    entry2: null,
-    tp1: null,
-    tp2: null,
-    sl: null,
-    selectedDirection: null,
+    signal: 'NO_TRADE', marketRegime: blocked ? 'MARKET_DATA_BLOCKED' : 'DATA_UNAVAILABLE', trend: 'NEUTRAL',
+    longScore: 0, shortScore: 0, score: 0, confidenceScore: 0, scoreMax: 10, signalValidity: 'BLOCKED', confidence: { label: 'LOW' },
+    scoreBreakdown: { total: 0, max: 10, technicalTotal: 0, adjustmentTotal: 0, breakdown: {}, items: [], adjustments: [],
+      rawTotal: 0, btcAdjustment: 0, fundingOiAdjustment: 0, status: 'NO_TRADE', hardBlock: reason, warnings: [reason] },
+    warnings: [reason, blocked ? 'Binance/Bybit did not return valid futures JSON.' : null, 'Signal generation disabled for safety.'].filter(Boolean),
+    blockedReason: [reason], rejectionReasons: [reason], hardBlock: reason, stale: true, dataValid: false,
+    invalidReason: snapshot.errorType ?? 'market_data_unavailable', entryContext: 'NO_TRADE', entryAdvice: 'No entry recommended.',
+    action: 'Wait until fresh futures market data is restored.', tradeLevelsVisible: false, watchLevels: null,
+    rr: null, rrRatio: null, rrTp1: null, rrTp2: null, atr: indicators?.atr ?? null, basis: [], entry1: null,
+    entry2: null, tp1: null, tp2: null, sl: null, selectedDirection: null,
   };
 }
 
@@ -181,96 +74,68 @@ function hydrateSnapshot(snapshot, btcContext = snapshot.btcContext ?? null, sig
   const watchlistMeta = getWatchlistMeta(snapshot.symbol);
   const priceFeedStale = snapshot.updatedAt ? Date.now() - snapshot.updatedAt > DATA_STALE_SIGNAL_MS : true;
   const indicators = calculateIndicators(snapshot.candles ?? [], snapshot.timeframe);
-  const liveIndicators = indicators
-    ? {
-        ...indicators,
-        price: snapshot.latestPrice ?? indicators.price,
-        change24h: snapshot.priceChange24h ?? indicators.change24h,
-        stale: Boolean(indicators.stale || priceFeedStale || snapshot.error),
-        feedStale: Boolean(priceFeedStale),
-        dataError: snapshot.error ?? '',
-        fundingRate: snapshot.fundingRate ?? null,
-        fundingUpdatedAt: snapshot.fundingUpdatedAt ?? null,
-        nextFundingTime: snapshot.nextFundingTime ?? null,
-        openInterest: snapshot.openInterest ?? null,
-        openInterestChange: snapshot.openInterestChange ?? null,
-        openInterestUpdatedAt: snapshot.openInterestUpdatedAt ?? null,
-        derivativesWarning: snapshot.derivativesWarning ?? '',
-        dataQuality: snapshot.dataQuality ?? 'FUTURES_CANDLES',
-        candleErrorType: snapshot.candleErrorType ?? null,
-      }
-    : Number.isFinite(snapshot.latestPrice)
-      ? {
-          price: snapshot.latestPrice,
-          change24h: snapshot.priceChange24h ?? null,
-          valid: false,
-          reason: 'insufficient_data',
-          stale: Boolean(priceFeedStale || snapshot.error),
-          feedStale: Boolean(priceFeedStale),
-          dataError: snapshot.error ?? '',
-          fundingRate: snapshot.fundingRate ?? null,
-          openInterest: snapshot.openInterest ?? null,
-          openInterestChange: snapshot.openInterestChange ?? null,
-          derivativesWarning: snapshot.derivativesWarning ?? '',
-          dataQuality: snapshot.dataQuality ?? 'PRICE_ONLY',
-          candleErrorType: snapshot.candleErrorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-        }
-      : null;
+  const setupIndicators = snapshot.setupIndicators ?? (snapshot.setupCandles?.length ? calculateIndicators(snapshot.setupCandles, SETUP_TIMEFRAME) : null);
+  const contextIndicators = snapshot.contextIndicators ?? (snapshot.contextCandles?.length ? calculateIndicators(snapshot.contextCandles, CONTEXT_TIMEFRAME) : null);
+  const baseIndicators = indicators ?? setupIndicators;
+  const liveIndicators = baseIndicators ? {
+    ...baseIndicators,
+    price: snapshot.latestPrice ?? baseIndicators.price,
+    change24h: snapshot.priceChange24h ?? baseIndicators.change24h,
+    stale: Boolean(baseIndicators.stale || priceFeedStale || snapshot.error),
+    feedStale: Boolean(priceFeedStale), dataError: snapshot.error ?? '',
+    fundingRate: snapshot.fundingRate ?? null, fundingUpdatedAt: snapshot.fundingUpdatedAt ?? null,
+    nextFundingTime: snapshot.nextFundingTime ?? null, openInterest: snapshot.derivatives?.openInterest?.current ?? snapshot.openInterest ?? null,
+    openInterestChange: snapshot.derivatives?.openInterest?.change1hPct ?? snapshot.openInterestChange ?? null,
+    openInterestChange1h: snapshot.derivatives?.openInterest?.change1hPct ?? null,
+    openInterestChange4h: snapshot.derivatives?.openInterest?.change4hPct ?? null,
+    openInterestUpdatedAt: snapshot.derivatives?.openInterest?.timestamp ?? snapshot.openInterestUpdatedAt ?? null,
+    longShortRatio: snapshot.derivatives?.longShort?.longShortRatio ?? null,
+    longAccount: snapshot.derivatives?.longShort?.longAccount ?? null,
+    shortAccount: snapshot.derivatives?.longShort?.shortAccount ?? null,
+    takerBuySellRatio: snapshot.derivatives?.taker?.buySellRatio ?? null,
+    takerDelta: snapshot.derivatives?.taker?.delta ?? null,
+    takerCvd: snapshot.derivatives?.taker?.cvd ?? null,
+    derivatives: snapshot.derivatives ?? null,
+    derivativesWarning: snapshot.derivativesWarning ?? '', dataQuality: snapshot.dataQuality ?? 'FUTURES_CANDLES',
+    candleErrorType: snapshot.candleErrorType ?? null,
+  } : Number.isFinite(snapshot.latestPrice) ? {
+    price: snapshot.latestPrice, change24h: snapshot.priceChange24h ?? null, valid: false, reason: 'insufficient_data',
+    stale: Boolean(priceFeedStale || snapshot.error), feedStale: Boolean(priceFeedStale), dataError: snapshot.error ?? '',
+    fundingRate: snapshot.fundingRate ?? null, openInterest: snapshot.openInterest ?? null,
+    openInterestChange: snapshot.openInterestChange ?? null, derivatives: snapshot.derivatives ?? null,
+    dataQuality: snapshot.dataQuality ?? 'PRICE_ONLY', candleErrorType: snapshot.candleErrorType ?? null,
+  } : null;
 
-  return {
-    ...snapshot,
-    watchlistMeta,
-    btcContext,
-    indicators: liveIndicators,
-    setup:
-      watchlistMeta.status === 'avoid'
-        ? buildAvoidSetup(liveIndicators, watchlistMeta)
-        : snapshot.error || snapshot.dataQuality === 'PRICE_ONLY'
-          ? buildUnavailableSetup(snapshot, liveIndicators)
-        : buildSignalSetup(liveIndicators, {
-            symbol: snapshot.symbol,
-            btcContext,
-            signalMode,
-          }),
-  };
+  const setupSource = setupIndicators ?? indicators;
+  const setup = watchlistMeta.status === 'avoid' ? buildAvoidSetup(liveIndicators, watchlistMeta)
+    : snapshot.error || snapshot.dataQuality === 'PRICE_ONLY' || !setupSource ? buildUnavailableSetup(snapshot, liveIndicators)
+    : buildSignalSetup({ ...setupSource, price: snapshot.latestPrice ?? setupSource.price, fundingRate: snapshot.fundingRate ?? setupSource.fundingRate,
+        openInterest: snapshot.derivatives?.openInterest?.current ?? snapshot.openInterest,
+        openInterestChange: snapshot.derivatives?.openInterest?.change1hPct ?? snapshot.openInterestChange,
+        btcBias: btcContext?.bias ?? setupSource.btcBias, btcRSI: btcContext?.rsi6 ?? setupSource.btcRSI },
+      { symbol: snapshot.symbol, btcContext, signalMode });
+
+  return { ...snapshot, watchlistMeta, btcContext, indicators: liveIndicators, setup, setupIndicators,
+    contextIndicators, htfIndicators: contextIndicators, fifteenMinuteIndicators: setupIndicators };
 }
 
 function createBaseSnapshot(symbol, timeframe = TIMEFRAME, signalMode = 'conservative') {
-  const watchlistMeta = getWatchlistMeta(symbol);
-
   return {
-    symbol,
-    watchlistMeta,
-    candles: [],
-    latestPrice: null,
-    priceChange24h: null,
-    exchange: getSourceLabel(),
-    mode: getSourceMode(),
-    timeframe: normalizeTimeframe(timeframe),
-    updatedAt: null,
-    loading: true,
-    error: '',
-    errorType: null,
-    warning: '',
-    retryAt: null,
-    btcContext: null,
-    indicators: null,
-    setup: null,
-    signalMode,
+    symbol, watchlistMeta: getWatchlistMeta(symbol), candles: [], setupCandles: [], contextCandles: [],
+    latestPrice: null, priceChange24h: null, exchange: getSourceLabel(), mode: getSourceMode(),
+    timeframe: normalizeTimeframe(timeframe), setupTimeframe: SETUP_TIMEFRAME, contextTimeframe: CONTEXT_TIMEFRAME,
+    updatedAt: null, loading: true, error: '', errorType: null, warning: '', retryAt: null, btcContext: null,
+    indicators: null, setupIndicators: null, contextIndicators: null, htfIndicators: null, fifteenMinuteIndicators: null,
+    derivatives: null, signalMode,
   };
 }
 
 function mergeSnapshot(current, patch, btcContext = patch.btcContext ?? current?.btcContext ?? null, signalMode = patch.signalMode ?? current?.signalMode ?? 'conservative') {
-  return hydrateSnapshot({
-    ...current,
-    ...patch,
-    signalMode,
-  }, btcContext, signalMode);
+  return hydrateSnapshot({ ...current, ...patch, signalMode }, btcContext, signalMode);
 }
 
 function formatRetryWarning(retryAt, now = Date.now()) {
-  const seconds = Math.max(0, Math.ceil((retryAt - now) / 1000));
-  return `Binance rate limited, retrying in ${seconds}s`;
+  return `Binance rate limited, retrying in ${Math.max(0, Math.ceil((retryAt - now) / 1000))}s`;
 }
 
 export function useWatchlistMarketData(symbols, timeframe = TIMEFRAME, signalMode = 'conservative') {
@@ -283,11 +148,8 @@ export function useWatchlistMarketData(symbols, timeframe = TIMEFRAME, signalMod
     setSnapshots((current) => {
       const next = {};
       symbols.forEach((symbol) => {
-        const currentSnapshot = current[symbol];
-        next[symbol] =
-          currentSnapshot?.timeframe === normalizedTimeframe && currentSnapshot?.signalMode === signalMode
-            ? currentSnapshot
-            : hydrateSnapshot({ ...(currentSnapshot ?? createBaseSnapshot(symbol, normalizedTimeframe, signalMode)), timeframe: normalizedTimeframe, signalMode }, undefined, signalMode);
+        const existing = current[symbol];
+        next[symbol] = existing?.signalMode === signalMode ? existing : createBaseSnapshot(symbol, normalizedTimeframe, signalMode);
       });
       return next;
     });
@@ -297,139 +159,118 @@ export function useWatchlistMarketData(symbols, timeframe = TIMEFRAME, signalMod
     let cancelled = false;
     let priceIntervalId = null;
     let candleIntervalId = null;
+    let derivativeIntervalId = null;
     let btcContextIntervalId = null;
     let warningIntervalId = null;
-
     const normalizedSymbols = symbols.map((symbol) => symbol.toUpperCase());
     const activeSymbols = normalizedSymbols.filter((symbol) => !isAvoidSymbol(symbol));
 
     async function syncCandles() {
-      const results = await Promise.allSettled(
-        activeSymbols.map(async (symbol) => {
-          const snapshot = await fetchBinanceMarketSnapshot(symbol, normalizedTimeframe);
-          return { symbol, snapshot };
-        }),
-      );
-
-      if (cancelled) {
-        return;
-      }
-
+      const results = await Promise.allSettled(activeSymbols.map(async (symbol) => {
+        const [setupResult, contextResult] = await Promise.all([
+          fetchBinanceMarketSnapshot(symbol, SETUP_TIMEFRAME),
+          fetchBinanceMarketSnapshot(symbol, CONTEXT_TIMEFRAME),
+        ]);
+        return { symbol, setup: setupResult, context: contextResult };
+      }));
+      if (cancelled) return;
       setSnapshots((current) => {
         const next = { ...current };
-
         results.forEach((result, index) => {
-          if (result.status === 'fulfilled') {
-            const { symbol, snapshot } = result.value;
+          const symbol = activeSymbols[index];
+          if (result.status === 'rejected') {
+            const error = result.reason;
             next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
-              candles: snapshot.candles,
-              timeframe: snapshot.timeframe,
-              latestPrice: snapshot.latestPrice,
-              priceChange24h: snapshot.change24h,
-              fundingRate: snapshot.fundingRate,
-              fundingUpdatedAt: snapshot.fundingUpdatedAt,
-              nextFundingTime: snapshot.nextFundingTime,
-              openInterest: snapshot.openInterest,
-              openInterestChange:
-                Number.isFinite(snapshot.openInterest) && Number.isFinite(current[symbol]?.openInterest)
-                  ? ((snapshot.openInterest - current[symbol].openInterest) / current[symbol].openInterest) * 100
-                  : null,
-              openInterestUpdatedAt: snapshot.openInterestUpdatedAt,
-              derivativesWarning: snapshot.derivativesWarning,
-              dataQuality: snapshot.dataQuality,
-              candleErrorType: snapshot.candleErrorType,
-              exchange: getSourceLabel(),
-              mode: getSourceMode(),
-              updatedAt: current[symbol]?.updatedAt ?? snapshot.updatedAt,
-              loading: false,
-              error: '',
-              warning: current[symbol]?.retryAt ? formatRetryWarning(current[symbol].retryAt) : '',
-              retryAt: current[symbol]?.retryAt ?? null,
-              signalMode,
+              loading: false, error: error.message, errorType: error.errorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR, signalMode,
             }, btcContextRef.current, signalMode);
             return;
           }
-
-          const symbol = activeSymbols[index];
-          const error = result.reason;
+          const { setup, context } = result.value;
+          const primary = normalizedTimeframe === CONTEXT_TIMEFRAME ? context : setup;
+          const candles = primary.candles ?? [];
           next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
-            loading: false,
-            error: error.message,
-            errorType: error.errorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-            signalMode,
+            candles, timeframe: normalizedTimeframe,
+            setupCandles: setup.candles ?? [], contextCandles: context.candles ?? [],
+            latestPrice: setup.latestPrice ?? context.latestPrice, priceChange24h: setup.change24h ?? context.change24h,
+            fundingRate: setup.fundingRate ?? context.fundingRate, fundingUpdatedAt: setup.fundingUpdatedAt ?? context.fundingUpdatedAt,
+            nextFundingTime: setup.nextFundingTime ?? context.nextFundingTime,
+            openInterest: setup.openInterest ?? context.openInterest,
+            openInterestUpdatedAt: setup.openInterestUpdatedAt ?? context.openInterestUpdatedAt,
+            derivativesWarning: setup.derivativesWarning ?? context.derivativesWarning,
+            dataQuality: setup.dataQuality === 'PRICE_ONLY' ? context.dataQuality : setup.dataQuality,
+            candleErrorType: setup.candleErrorType ?? context.candleErrorType,
+            exchange: getSourceLabel(), mode: getSourceMode(), updatedAt: Math.max(setup.updatedAt ?? 0, context.updatedAt ?? 0) || Date.now(),
+            loading: false, error: setup.error && context.error ? setup.error : '', errorType: null, signalMode,
+          }, btcContextRef.current, signalMode);
+          next[symbol].candles = candles;
+        });
+        return next;
+      });
+    }
+
+    async function syncDerivatives() {
+      const results = await Promise.allSettled(activeSymbols.map(async (symbol) => {
+        const [oi, longShort, taker] = await Promise.all([
+          fetchBinanceOpenInterestHistory(symbol, { period: '1h', limit: OI_LIMIT }),
+          fetchBinanceGlobalLongShortRatio(symbol, { period: '15m', limit: DERIVATIVE_LIMIT }),
+          fetchBinanceTakerLongShort(symbol, { period: '15m', limit: DERIVATIVE_LIMIT }),
+        ]);
+        return { symbol, derivative: buildDerivativeSnapshot({ openInterestHistory: oi, longShortHistory: longShort, takerHistory: taker }) };
+      }));
+      if (cancelled) return;
+      setSnapshots((current) => {
+        const next = { ...current };
+        results.forEach((result, index) => {
+          const symbol = activeSymbols[index];
+          if (result.status === 'rejected') {
+            const error = result.reason;
+            if (isRateLimitedError(error)) retryAtRef.current = Date.now() + RATE_LIMIT_BACKOFF_MS;
+            next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
+              derivativesWarning: error.message, signalMode,
+            }, btcContextRef.current, signalMode);
+            return;
+          }
+          next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
+            derivatives: result.value.derivative,
+            openInterest: result.value.derivative.openInterest.current,
+            openInterestChange: result.value.derivative.openInterest.change1hPct,
+            openInterestUpdatedAt: result.value.derivative.openInterest.timestamp,
+            derivativesWarning: '', signalMode,
           }, btcContextRef.current, signalMode);
         });
-
         return next;
       });
     }
 
     async function syncBatchPrices() {
-      if (!normalizedSymbols.length || Date.now() < retryAtRef.current) {
-        return;
-      }
-
+      if (!normalizedSymbols.length || Date.now() < retryAtRef.current) return;
       try {
         const quotes = await fetchBinanceBatchPrices(normalizedSymbols);
-        if (cancelled) {
-          return;
-        }
-
+        if (cancelled) return;
         retryAtRef.current = 0;
         setSnapshots((current) => {
           const next = { ...current };
-
           normalizedSymbols.forEach((symbol) => {
             const quote = quotes[symbol];
-            const currentSnapshot = current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe);
-
-            next[symbol] = mergeSnapshot(currentSnapshot, {
-              latestPrice: quote?.price ?? currentSnapshot.latestPrice,
-              exchange: getSourceLabel(),
-              mode: getSourceMode(),
-              updatedAt: quote?.updatedAt ?? currentSnapshot.updatedAt,
-              loading: false,
-              error: quote ? '' : currentSnapshot.error,
-              errorType: quote ? null : currentSnapshot.errorType,
-              warning: '',
-              retryAt: null,
-              signalMode,
+            const snapshot = current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe, signalMode);
+            next[symbol] = mergeSnapshot(snapshot, {
+              latestPrice: quote?.price ?? snapshot.latestPrice, updatedAt: quote?.updatedAt ?? snapshot.updatedAt,
+              exchange: getSourceLabel(), mode: getSourceMode(), loading: false, error: quote ? '' : snapshot.error,
+              errorType: quote ? null : snapshot.errorType, warning: '', retryAt: null, signalMode,
             }, btcContextRef.current, signalMode);
           });
-
           return next;
         });
       } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        if (isRateLimitedError(error)) {
-          retryAtRef.current = Date.now() + RATE_LIMIT_BACKOFF_MS;
-          setSnapshots((current) => {
-            const next = { ...current };
-            normalizedSymbols.forEach((symbol) => {
-              next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
-                warning: formatRetryWarning(retryAtRef.current),
-                retryAt: retryAtRef.current,
-                loading: false,
-                signalMode,
-              }, btcContextRef.current, signalMode);
-            });
-            return next;
-          });
-          return;
-        }
-
+        if (cancelled) return;
+        if (isRateLimitedError(error)) retryAtRef.current = Date.now() + RATE_LIMIT_BACKOFF_MS;
         setSnapshots((current) => {
           const next = { ...current };
           normalizedSymbols.forEach((symbol) => {
-            const currentSnapshot = current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe);
-            next[symbol] = mergeSnapshot(currentSnapshot, {
-              loading: false,
-              error: isPairUnavailableError(error) ? error.message : currentSnapshot.error || error.message,
-              errorType: error.errorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-              signalMode,
+            const snapshot = current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe, signalMode);
+            next[symbol] = mergeSnapshot(snapshot, {
+              loading: false, error: isPairUnavailableError(error) ? error.message : snapshot.error || error.message,
+              errorType: error.errorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR, signalMode,
             }, btcContextRef.current, signalMode);
           });
           return next;
@@ -440,27 +281,17 @@ export function useWatchlistMarketData(symbols, timeframe = TIMEFRAME, signalMod
     async function syncBtcContext() {
       try {
         const btcContext = await fetchBtcContext();
-        if (cancelled) {
-          return;
-        }
-
+        if (cancelled) return;
         btcContextRef.current = btcContext;
         setSnapshots((current) => {
           const next = { ...current };
           normalizedSymbols.forEach((symbol) => {
-            next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe), {
-              btcContext,
-              signalMode,
-            }, btcContext, signalMode);
+            next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe, signalMode), { btcContext, signalMode }, btcContext, signalMode);
           });
           return next;
         });
       } catch {
-        if (cancelled) {
-          return;
-        }
-
-        btcContextRef.current = null;
+        if (!cancelled) btcContextRef.current = null;
       }
     }
 
@@ -468,62 +299,40 @@ export function useWatchlistMarketData(symbols, timeframe = TIMEFRAME, signalMod
       setSnapshots((current) => {
         const next = { ...current };
         normalizedSymbols.forEach((symbol) => {
-          next[symbol] = hydrateSnapshot({
-            ...(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe)),
-            timeframe: normalizedTimeframe,
-            loading: true,
-            error: '',
-            warning: '',
-            retryAt: null,
-            signalMode,
-          }, undefined, signalMode);
+          next[symbol] = mergeSnapshot(current[symbol] ?? createBaseSnapshot(symbol, normalizedTimeframe, signalMode), { loading: true, error: '', signalMode }, undefined, signalMode);
         });
         return next;
       });
-
-      await syncBtcContext();
-      await syncCandles();
-      await syncBatchPrices();
-
+      await Promise.all([syncBtcContext(), syncCandles(), syncBatchPrices(), syncDerivatives()]);
+      if (cancelled) return;
       priceIntervalId = window.setInterval(syncBatchPrices, PRICE_POLL_MS);
       candleIntervalId = window.setInterval(syncCandles, CANDLE_POLL_MS);
+      derivativeIntervalId = window.setInterval(syncDerivatives, DERIVATIVE_POLL_MS);
       btcContextIntervalId = window.setInterval(syncBtcContext, BTC_CONTEXT_POLL_MS);
       warningIntervalId = window.setInterval(() => {
-        if (cancelled) {
-          return;
-        }
-
+        if (cancelled) return;
         setSnapshots((current) => {
           const next = { ...current };
           let changed = false;
-
           normalizedSymbols.forEach((symbol) => {
             const snapshot = current[symbol];
-            if (!snapshot?.retryAt) {
-              return;
-            }
-
+            if (!snapshot?.retryAt) return;
             changed = true;
             next[symbol] = mergeSnapshot(snapshot, {
               warning: snapshot.retryAt > Date.now() ? formatRetryWarning(snapshot.retryAt) : '',
-              retryAt: snapshot.retryAt > Date.now() ? snapshot.retryAt : null,
-              signalMode,
+              retryAt: snapshot.retryAt > Date.now() ? snapshot.retryAt : null, signalMode,
             }, undefined, signalMode);
           });
-
           return changed ? next : current;
         });
       }, 1000);
     }
 
     bootstrap();
-
     return () => {
       cancelled = true;
-      window.clearInterval(priceIntervalId);
-      window.clearInterval(candleIntervalId);
-      window.clearInterval(btcContextIntervalId);
-      window.clearInterval(warningIntervalId);
+      window.clearInterval(priceIntervalId); window.clearInterval(candleIntervalId); window.clearInterval(derivativeIntervalId);
+      window.clearInterval(btcContextIntervalId); window.clearInterval(warningIntervalId);
     };
   }, [normalizedTimeframe, signalMode, symbols]);
 

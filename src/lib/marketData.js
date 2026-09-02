@@ -99,77 +99,27 @@ export function createMarketDataError(message, errorType = MARKET_ERROR_TYPES.UN
 async function assertUsableJsonResponse(response, provider) {
   const location = response.headers.get('location') ?? '';
   const contentType = response.headers.get('content-type') ?? '';
-  const wasBlocked =
-    location.includes(NETWORK_BLOCK_HOST) ||
-    response.url.includes(NETWORK_BLOCK_HOST) ||
-    response.redirected;
-
-  if (wasBlocked) {
-    throw createMarketDataError(
-      `${provider} blocked by network filter (${NETWORK_BLOCK_HOST})`,
-      MARKET_ERROR_TYPES.NETWORK_BLOCKED,
-    );
-  }
-
+  const wasBlocked = location.includes(NETWORK_BLOCK_HOST) || response.url.includes(NETWORK_BLOCK_HOST) || response.redirected;
+  if (wasBlocked) throw createMarketDataError(`${provider} blocked by network filter (${NETWORK_BLOCK_HOST})`, MARKET_ERROR_TYPES.NETWORK_BLOCKED);
   if (contentType.includes('text/html')) {
     const html = await response.text();
-    if (html.includes(NETWORK_BLOCK_HOST) || html.toLowerCase().includes('internetsehat')) {
-      throw createMarketDataError(
-        `${provider} blocked by network filter (${NETWORK_BLOCK_HOST})`,
-        MARKET_ERROR_TYPES.NETWORK_BLOCKED,
-      );
-    }
-
+    if (html.includes(NETWORK_BLOCK_HOST) || html.toLowerCase().includes('internetsehat')) throw createMarketDataError(`${provider} blocked by network filter (${NETWORK_BLOCK_HOST})`, MARKET_ERROR_TYPES.NETWORK_BLOCKED);
     throw createMarketDataError(`${provider} returned HTML instead of market JSON`, MARKET_ERROR_TYPES.UPSTREAM_HTML_RESPONSE);
   }
 }
 
 function normalizeFetchError(error, provider) {
-  if (error instanceof Error && error.message === 'Failed to fetch') {
-    return createMarketDataError(
-      `${provider} request failed. Network policy or proxy setup is blocking data access.`,
-      MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-    );
-  }
-
+  if (error instanceof Error && error.message === 'Failed to fetch') return createMarketDataError(`${provider} request failed. Network policy or proxy setup is blocking data access.`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR);
   return error;
 }
-
-function createPairUnavailableError() {
-  return new Error(PAIR_UNAVAILABLE);
-}
-
-function createRateLimitedError() {
-  return createMarketDataError(RATE_LIMITED, MARKET_ERROR_TYPES.RATE_LIMITED);
-}
-
-export function isPairUnavailableError(error) {
-  return error instanceof Error && error.message === PAIR_UNAVAILABLE;
-}
-
-export function isRateLimitedError(error) {
-  return error instanceof Error && error.message === RATE_LIMITED;
-}
-
-function ensureKlinesPayload(payload) {
-  if (!Array.isArray(payload) || payload.length === 0) {
-    throw createPairUnavailableError();
-  }
-
-  return payload;
-}
+function createPairUnavailableError() { return new Error(PAIR_UNAVAILABLE); }
+function createRateLimitedError() { return createMarketDataError(RATE_LIMITED, MARKET_ERROR_TYPES.RATE_LIMITED); }
+export function isPairUnavailableError(error) { return error instanceof Error && error.message === PAIR_UNAVAILABLE; }
+export function isRateLimitedError(error) { return error instanceof Error && error.message === RATE_LIMITED; }
+function ensureKlinesPayload(payload) { if (!Array.isArray(payload) || payload.length === 0) throw createPairUnavailableError(); return payload; }
 
 function parseKline(kline) {
-  const [
-    openTime,
-    open,
-    high,
-    low,
-    close,
-    volume,
-    closeTime,
-  ] = kline;
-
+  const [openTime, open, high, low, close, volume, closeTime] = kline;
   return {
     time: Math.floor(Number(openTime) / 1000),
     open: Number(open),
@@ -184,280 +134,106 @@ function parseKline(kline) {
 async function fetchBinanceJson(path, params, provider, { allowEmptyArray = false } = {}) {
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-
   try {
     const response = await fetch(buildProxyUrl(path, params), { signal: controller.signal });
     await assertUsableJsonResponse(response, provider);
-
     if (!response.ok) {
       let errorPayload = null;
-      try {
-        errorPayload = await response.clone().json();
-      } catch {
-        errorPayload = null;
-      }
-
-      if (errorPayload?.errorType) {
-        throw createMarketDataError(errorPayload.message ?? `${provider} error ${response.status}`, errorPayload.errorType, errorPayload);
-      }
-
-      if (response.status === 404 || response.status === 400) {
-        throw createPairUnavailableError();
-      }
-
-      if (response.status === 429) {
-        throw createRateLimitedError();
-      }
-
+      try { errorPayload = await response.clone().json(); } catch { errorPayload = null; }
+      if (errorPayload?.errorType) throw createMarketDataError(errorPayload.message ?? `${provider} error ${response.status}`, errorPayload.errorType, errorPayload);
+      if (response.status === 404 || response.status === 400) throw createPairUnavailableError();
+      if (response.status === 429) throw createRateLimitedError();
       throw createMarketDataError(`${provider} error ${response.status}`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR);
     }
-
     let payload;
-    try {
-      payload = await response.json();
-    } catch {
-      throw createMarketDataError(`${provider} returned invalid JSON`, MARKET_ERROR_TYPES.INVALID_JSON);
-    }
-    if (payload?.ok === false && payload?.errorType) {
-      throw createMarketDataError(payload.message ?? `${provider} error`, payload.errorType, payload);
-    }
-    if (!allowEmptyArray && Array.isArray(payload) && payload.length === 0) {
-      throw createPairUnavailableError();
-    }
-
-    if (payload?.code === -1121) {
-      throw createPairUnavailableError();
-    }
-
-    if (payload?.code === -1003) {
-      throw createRateLimitedError();
-    }
-
+    try { payload = await response.json(); } catch { throw createMarketDataError(`${provider} returned invalid JSON`, MARKET_ERROR_TYPES.INVALID_JSON); }
+    if (payload?.ok === false && payload?.errorType) throw createMarketDataError(payload.message ?? `${provider} error`, payload.errorType, payload);
+    if (!allowEmptyArray && Array.isArray(payload) && payload.length === 0) throw createPairUnavailableError();
+    if (payload?.code === -1121) throw createPairUnavailableError();
+    if (payload?.code === -1003) throw createRateLimitedError();
     return payload;
   } catch (error) {
-    if (error?.name === 'AbortError') {
-      throw createMarketDataError(`${provider} timed out after ${FETCH_TIMEOUT_MS / 1000}s`, MARKET_ERROR_TYPES.UPSTREAM_TIMEOUT);
-    }
-
+    if (error?.name === 'AbortError') throw createMarketDataError(`${provider} timed out after ${FETCH_TIMEOUT_MS / 1000}s`, MARKET_ERROR_TYPES.UPSTREAM_TIMEOUT);
     throw normalizeFetchError(error, provider);
-  } finally {
-    window.clearTimeout(timeoutId);
-  }
+  } finally { window.clearTimeout(timeoutId); }
 }
 
 export async function fetchBinanceCandles(symbol, interval = TIMEFRAME, limit = CANDLE_LIMIT) {
   const normalized = normalizeSymbol(symbol);
   const normalizedInterval = normalizeTimeframe(interval);
-  const payload = await fetchBinanceJson(
-    '/api/binance',
-    {
-      endpoint: 'klines',
-      symbol: normalized,
-      interval: normalizedInterval,
-      limit: String(limit),
-    },
-    'Binance klines',
-  );
-
+  const payload = await fetchBinanceJson('/api/binance', { endpoint: 'klines', symbol: normalized, interval: normalizedInterval, limit: String(limit) }, 'Binance klines');
   return ensureKlinesPayload(payload).map(parseKline);
 }
 
 export async function fetchBinanceFundingHistory(symbol, { startTime, endTime, limit = 1000 } = {}) {
   const normalized = normalizeSymbol(symbol);
-  const payload = await fetchBinanceJson(
-    '/api/market-data',
-    {
-      provider: 'binance',
-      type: 'fundingHistory',
-      symbol: normalized,
-      limit: String(Math.min(1000, Math.max(1, Number(limit) || 1000))),
-      ...(Number.isFinite(startTime) ? { startTime: String(Math.floor(startTime)) } : {}),
-      ...(Number.isFinite(endTime) ? { endTime: String(Math.floor(endTime)) } : {}),
-    },
-    'Binance funding history',
-    { allowEmptyArray: true },
-  );
-
-  if (!Array.isArray(payload)) {
-    throw new Error('Binance returned invalid funding history payload');
-  }
-
-  return payload
-    .map((record) => {
-      const time = Number(record?.fundingTime ?? record?.time);
-      const fundingRate = Number(record?.fundingRate);
-      return Number.isFinite(time) && Number.isFinite(fundingRate) ? { time, fundingRate } : null;
-    })
-    .filter(Boolean);
+  const payload = await fetchBinanceJson('/api/market-data', { provider: 'binance', type: 'fundingHistory', symbol: normalized, limit: String(Math.min(1000, Math.max(1, Number(limit) || 1000))), ...(Number.isFinite(startTime) ? { startTime: String(Math.floor(startTime)) } : {}), ...(Number.isFinite(endTime) ? { endTime: String(Math.floor(endTime)) } : {}) }, 'Binance funding history', { allowEmptyArray: true });
+  if (!Array.isArray(payload)) throw new Error('Binance returned invalid funding history payload');
+  return payload.map((record) => { const time = Number(record?.fundingTime ?? record?.time); const fundingRate = Number(record?.fundingRate); return Number.isFinite(time) && Number.isFinite(fundingRate) ? { time, fundingRate } : null; }).filter(Boolean);
 }
 
 export async function fetchBinance24hr(symbol) {
   const normalized = normalizeSymbol(symbol);
-  const payload = await fetchBinanceJson(
-    '/api/binance',
-    {
-      endpoint: 'ticker/24hr',
-      symbol: normalized,
-    },
-    'Binance 24hr ticker',
-  );
-
-  const lastPrice = Number(payload?.lastPrice);
-  const change24h = Number(payload?.priceChangePercent);
-
-  if (!Number.isFinite(lastPrice)) {
-    throw new Error('Binance returned invalid 24hr ticker payload');
-  }
-
-  return {
-    price: lastPrice,
-    change24h: Number.isFinite(change24h) ? change24h : null,
-    updatedAt: Date.now(),
-  };
+  const payload = await fetchBinanceJson('/api/binance', { endpoint: 'ticker/24hr', symbol: normalized }, 'Binance 24hr ticker');
+  const lastPrice = Number(payload?.lastPrice); const change24h = Number(payload?.priceChangePercent);
+  if (!Number.isFinite(lastPrice)) throw new Error('Binance returned invalid 24hr ticker payload');
+  return { price: lastPrice, change24h: Number.isFinite(change24h) ? change24h : null, updatedAt: Date.now() };
 }
 
 export async function fetchBinancePrice(symbol) {
   const normalized = normalizeSymbol(symbol);
-  const payload = await fetchBinanceJson(
-    '/api/binance',
-    {
-      endpoint: 'ticker/price',
-      symbol: normalized,
-    },
-    'Binance price ticker',
-  );
-
-  const price = Number(payload?.price);
-  if (!Number.isFinite(price)) {
-    throw new Error('Binance returned invalid price payload');
-  }
-
-  return {
-    price,
-    updatedAt: Date.now(),
-  };
+  const payload = await fetchBinanceJson('/api/binance', { endpoint: 'ticker/price', symbol: normalized }, 'Binance price ticker');
+  const price = Number(payload?.price); if (!Number.isFinite(price)) throw new Error('Binance returned invalid price payload');
+  return { price, updatedAt: Date.now() };
 }
 
 export async function fetchBinanceBatchPrices(symbols) {
-  const normalizedSymbols = symbols.map(normalizeSymbol).filter(Boolean);
-  if (!normalizedSymbols.length) {
-    return {};
-  }
-
-  const payload = await fetchBinanceJson(
-    '/api/binance-ws-fallback',
-    {
-      symbols: normalizedSymbols.join(','),
-    },
-    'Binance batch price polling',
-    { allowEmptyArray: true },
-  );
-
-  if (!Array.isArray(payload)) {
-    throw new Error('Binance batch polling returned invalid payload');
-  }
-
+  const normalizedSymbols = symbols.map(normalizeSymbol).filter(Boolean); if (!normalizedSymbols.length) return {};
+  const payload = await fetchBinanceJson('/api/binance-ws-fallback', { symbols: normalizedSymbols.join(',') }, 'Binance batch price polling', { allowEmptyArray: true });
+  if (!Array.isArray(payload)) throw new Error('Binance batch polling returned invalid payload');
   const now = Date.now();
-
-  return payload.reduce((accumulator, item) => {
-    const symbol = normalizeSymbol(item?.symbol ?? '');
-    const price = Number(item?.price);
-
-    if (symbol && Number.isFinite(price)) {
-      accumulator[symbol] = {
-        price,
-        updatedAt: now,
-      };
-    }
-
-    return accumulator;
-  }, {});
+  return payload.reduce((accumulator, item) => { const symbol = normalizeSymbol(item?.symbol ?? ''); const price = Number(item?.price); if (symbol && Number.isFinite(price)) accumulator[symbol] = { price, updatedAt: now }; return accumulator; }, {});
 }
 
 export async function fetchBinanceFunding(symbol) {
   const normalized = normalizeSymbol(symbol);
-  const payload = await fetchBinanceJson(
-    '/api/market-data',
-    {
-      provider: 'binance',
-      type: 'funding',
-      symbol: normalized,
-    },
-    'Binance funding rate',
-  );
-
-  const fundingRate = Number(payload?.fundingRate ?? payload?.lastFundingRate);
-  if (!Number.isFinite(fundingRate)) {
-    throw new Error('Binance returned invalid funding payload');
-  }
-
-  return {
-    fundingRate,
-    nextFundingTime: Number(payload?.nextFundingTime) || null,
-    updatedAt: Date.now(),
-  };
+  const payload = await fetchBinanceJson('/api/market-data', { provider: 'binance', type: 'funding', symbol: normalized }, 'Binance funding rate');
+  const fundingRate = Number(payload?.fundingRate ?? payload?.lastFundingRate); if (!Number.isFinite(fundingRate)) throw new Error('Binance returned invalid funding payload');
+  return { fundingRate, nextFundingTime: Number(payload?.nextFundingTime) || null, updatedAt: Date.now() };
 }
 
 export async function fetchBinanceOpenInterest(symbol) {
   const normalized = normalizeSymbol(symbol);
-  const payload = await fetchBinanceJson(
-    '/api/market-data',
-    {
-      provider: 'binance',
-      type: 'openinterest',
-      symbol: normalized,
-    },
-    'Binance open interest',
-  );
-
-  const openInterest = Number(payload?.openInterest);
-  if (!Number.isFinite(openInterest)) {
-    throw new Error('Binance returned invalid open interest payload');
-  }
-
-  return {
-    openInterest,
-    updatedAt: Date.now(),
-  };
+  const payload = await fetchBinanceJson('/api/market-data', { provider: 'binance', type: 'openinterest', symbol: normalized }, 'Binance open interest');
+  const openInterest = Number(payload?.openInterest); if (!Number.isFinite(openInterest)) throw new Error('Binance returned invalid open interest payload');
+  return { openInterest, updatedAt: Date.now() };
 }
 
 export async function fetchBinanceMarketSnapshot(symbol, interval = TIMEFRAME) {
   const normalizedInterval = normalizeTimeframe(interval);
-  const [candlesResult, tickerResult, fundingResult, openInterestResult] = await Promise.allSettled([
-    fetchBinanceCandles(symbol, normalizedInterval, CANDLE_LIMIT),
-    fetchBinance24hr(symbol),
-    fetchBinanceFunding(symbol),
-    fetchBinanceOpenInterest(symbol),
-  ]);
+  const [candlesResult, tickerResult, fundingResult, openInterestResult] = await Promise.allSettled([fetchBinanceCandles(symbol, normalizedInterval, CANDLE_LIMIT), fetchBinance24hr(symbol), fetchBinanceFunding(symbol), fetchBinanceOpenInterest(symbol)]);
   const candles = candlesResult.status === 'fulfilled' ? candlesResult.value : [];
   const ticker24h = tickerResult.status === 'fulfilled' ? tickerResult.value : null;
-
-  if (!candles.length && !ticker24h) {
-    const error = candlesResult.reason ?? tickerResult.reason;
-    throw error;
-  }
-
+  if (!candles.length && !ticker24h) throw (candlesResult.reason ?? tickerResult.reason);
   const fundingValue = fundingResult.status === 'fulfilled' ? fundingResult.value : { error: fundingResult.reason };
-  const openInterestValue =
-    openInterestResult.status === 'fulfilled' ? openInterestResult.value : { error: openInterestResult.reason };
-
-  const derivativesWarnings = [
-    fundingValue?.error ? `Funding/OI unavailable: ${fundingValue.error.message}` : null,
-    openInterestValue?.error ? `Funding/OI unavailable: ${openInterestValue.error.message}` : null,
-  ].filter(Boolean);
+  const openInterestValue = openInterestResult.status === 'fulfilled' ? openInterestResult.value : { error: openInterestResult.reason };
+  const derivativesWarnings = [fundingValue?.error ? `Funding/OI unavailable: ${fundingValue.error.message}` : null, openInterestValue?.error ? `Funding/OI unavailable: ${openInterestValue.error.message}` : null].filter(Boolean);
   const candleWarning = candles.length ? '' : `Insufficient futures candle data: ${candlesResult.reason?.message ?? 'klines unavailable'}`;
-
+  const lastClosedCandle = candles.filter((candle) => { const closeTime = Number(candle?.closeTime); return Number.isFinite(closeTime) && closeTime * 1000 <= Date.now(); }).at(-1) ?? candles.at(-1) ?? null;
+  const candleUpdatedAt = lastClosedCandle ? (Number(lastClosedCandle.closeTime) * 1000 || Number(lastClosedCandle.time) * 1000 || null) : null;
   return {
     candles,
     timeframe: normalizedInterval,
     latestPrice: ticker24h?.price ?? candles[candles.length - 1]?.close ?? null,
     change24h: ticker24h?.change24h ?? null,
-    updatedAt: candles.length ? (ticker24h?.updatedAt ?? Date.now()) : ticker24h?.updatedAt,
+    updatedAt: candleUpdatedAt ?? ticker24h?.updatedAt ?? null,
+    candleUpdatedAt,
     fundingRate: fundingValue?.error ? null : fundingValue.fundingRate,
     fundingUpdatedAt: fundingValue?.error ? null : fundingValue.updatedAt,
     nextFundingTime: fundingValue?.error ? null : fundingValue.nextFundingTime,
     openInterest: openInterestValue?.error ? null : openInterestValue.openInterest,
     openInterestUpdatedAt: openInterestValue?.error ? null : openInterestValue.updatedAt,
+    derivativesWarnings: derivativesWarnings,
     derivativesWarning: [...derivativesWarnings, candleWarning].filter(Boolean).join('; '),
     dataQuality: candles.length ? 'FUTURES_CANDLES' : 'PRICE_ONLY',
     signalAllowed: Boolean(candles.length),
@@ -466,96 +242,24 @@ export async function fetchBinanceMarketSnapshot(symbol, interval = TIMEFRAME) {
 }
 
 export async function fetchEthConvictionData() {
-  const endTime = Date.now();
-  const startTime = endTime - ETH_CONVICTION_FUNDING_HISTORY_DAYS * 24 * 60 * 60 * 1000;
-  const [candles, latestFunding, fundingHistory] = await Promise.all([
-    fetchBinanceCandles('ETHUSDT', '1h', ETH_CONVICTION_CANDLE_LIMIT),
-    fetchBinanceFunding('ETHUSDT'),
-    fetchBinanceFundingHistory('ETHUSDT', { startTime, endTime, limit: 1000 }),
-  ]);
-
-  return {
-    candles,
-    latestFunding,
-    fundingHistory,
-  };
+  const endTime = Date.now(); const startTime = endTime - ETH_CONVICTION_FUNDING_HISTORY_DAYS * 24 * 60 * 60 * 1000;
+  const [candles, latestFunding, fundingHistory] = await Promise.all([fetchBinanceCandles('ETHUSDT', '1h', ETH_CONVICTION_CANDLE_LIMIT), fetchBinanceFunding('ETHUSDT'), fetchBinanceFundingHistory('ETHUSDT', { startTime, endTime, limit: 1000 })]);
+  return { candles, latestFunding, fundingHistory };
 }
 
-export function buildTradingViewSymbol(symbol) {
-  const normalized = normalizeSymbol(symbol);
-  return `BINANCE:${normalized}`;
-}
-
-function freshnessFromUpdatedAt(updatedAt) {
-  if (!updatedAt) {
-    return 'STALE';
-  }
-
-  return Date.now() - updatedAt <= DATA_STALE_SIGNAL_MS ? 'FRESH' : 'STALE';
-}
-
-function providerError(error, source, endpoint, symbol) {
-  return {
-    source,
-    ok: false,
-    data: null,
-    errorType: error?.errorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-    message: error?.message ?? 'Unknown market data error',
-    endpoint,
-    symbol,
-    freshness: 'STALE',
-    signalAllowed: false,
-  };
-}
+export function buildTradingViewSymbol(symbol) { return `BINANCE:${normalizeSymbol(symbol)}`; }
+function freshnessFromUpdatedAt(updatedAt) { if (!updatedAt) return 'STALE'; return Date.now() - updatedAt <= DATA_STALE_SIGNAL_MS ? 'FRESH' : 'STALE'; }
+function providerError(error, source, endpoint, symbol) { return { source, ok: false, data: null, errorType: error?.errorType ?? MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR, message: error?.message ?? 'Unknown market data error', endpoint, symbol, freshness: 'STALE', signalAllowed: false }; }
 
 export async function getKlines(symbol, timeframe = TIMEFRAME, source = 'binance_futures') {
-  try {
-    if (source !== 'binance_futures') {
-      throw createMarketDataError(`${source} klines provider not wired into signal engine yet`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR);
-    }
-    const data = await fetchBinanceCandles(symbol, timeframe, CANDLE_LIMIT);
-    return { source, ok: true, data, errorType: null, freshness: 'FRESH', signalAllowed: true };
-  } catch (error) {
-    return providerError(error, source, 'klines', symbol);
-  }
+  try { if (source !== 'binance_futures') throw createMarketDataError(`${source} klines provider not wired into signal engine yet`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR); const data = await fetchBinanceCandles(symbol, timeframe, CANDLE_LIMIT); return { source, ok: true, data, errorType: null, freshness: 'FRESH', signalAllowed: true }; } catch (error) { return providerError(error, source, 'klines', symbol); }
 }
-
 export async function getFunding(symbol, source = 'binance_futures') {
-  try {
-    if (source !== 'binance_futures') {
-      throw createMarketDataError(`${source} funding unavailable`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR);
-    }
-    const data = await fetchBinanceFunding(symbol);
-    return { source, ok: true, data, errorType: null, freshness: freshnessFromUpdatedAt(data.updatedAt), signalAllowed: true };
-  } catch (error) {
-    return providerError(error, source, 'funding', symbol);
-  }
+  try { if (source !== 'binance_futures') throw createMarketDataError(`${source} funding unavailable`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR); const data = await fetchBinanceFunding(symbol); return { source, ok: true, data, errorType: null, freshness: freshnessFromUpdatedAt(data.updatedAt), signalAllowed: true }; } catch (error) { return providerError(error, source, 'funding', symbol); }
 }
-
 export async function getOpenInterest(symbol, source = 'binance_futures') {
-  try {
-    if (source !== 'binance_futures') {
-      throw createMarketDataError(`${source} open interest unavailable`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR);
-    }
-    const data = await fetchBinanceOpenInterest(symbol);
-    return { source, ok: true, data, errorType: null, freshness: freshnessFromUpdatedAt(data.updatedAt), signalAllowed: true };
-  } catch (error) {
-    return providerError(error, source, 'open_interest', symbol);
-  }
+  try { if (source !== 'binance_futures') throw createMarketDataError(`${source} open interest unavailable`, MARKET_ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR); const data = await fetchBinanceOpenInterest(symbol); return { source, ok: true, data, errorType: null, freshness: freshnessFromUpdatedAt(data.updatedAt), signalAllowed: true }; } catch (error) { return providerError(error, source, 'open_interest', symbol); }
 }
-
 export async function getMarketSnapshot(symbol, timeframe = TIMEFRAME) {
-  try {
-    const data = await fetchBinanceMarketSnapshot(symbol, timeframe);
-    return {
-      source: 'binance_futures',
-      ok: true,
-      data,
-      errorType: null,
-      freshness: freshnessFromUpdatedAt(data.updatedAt),
-      signalAllowed: Boolean(data.signalAllowed),
-    };
-  } catch (error) {
-    return providerError(error, 'binance_futures', 'snapshot', symbol);
-  }
+  try { const data = await fetchBinanceMarketSnapshot(symbol, timeframe); return { source: 'binance_futures', ok: true, data, errorType: null, freshness: freshnessFromUpdatedAt(data.updatedAt), signalAllowed: Boolean(data.signalAllowed) }; } catch (error) { return providerError(error, 'binance_futures', 'snapshot', symbol); }
 }

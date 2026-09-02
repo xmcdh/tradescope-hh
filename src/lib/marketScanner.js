@@ -29,10 +29,16 @@ function momentumDirection(i) {
   return 'NEUTRAL';
 }
 function setupDirection(i) {
-  const structure = structureDirection(i), bos = i?.marketStructure?.bos?.direction;
-  if (i?.marketStructure?.failedRetest?.detected) return 'NEUTRAL';
-  if (bos === 'bullish' || structure === 'BULLISH' || i?.marketStructure?.retest?.complete) return 'BULLISH';
-  if (bos === 'bearish' || structure === 'BEARISH') return 'BEARISH';
+  const structure = structureDirection(i);
+  const bos = i?.marketStructure?.bos?.direction;
+  const retest = i?.marketStructure?.retest;
+  const failedRetest = i?.marketStructure?.failedRetest;
+  const sweep = i?.marketStructure?.liquiditySweep;
+  if (failedRetest?.detected) return 'NEUTRAL';
+  if (bos === 'bullish' || bos === 'bearish') return bos === 'bullish' ? 'BULLISH' : 'BEARISH';
+  if (retest?.complete && structure !== 'NEUTRAL') return structure;
+  if (structure !== 'NEUTRAL') return structure;
+  if (sweep?.detected && sweep?.reclaimed) return sweep.direction === 'bullish' ? 'BULLISH' : 'BEARISH';
   return momentumDirection(i);
 }
 function scoreTrend(i) {
@@ -52,12 +58,14 @@ function scoreHtfStructure(i) {
   return 10;
 }
 function scoreSetupStructure(i) {
-  const d = structureDirection(i), b = i?.marketStructure?.bos?.direction;
+  const d = setupDirection(i), b = i?.marketStructure?.bos?.direction;
   if (d === 'NEUTRAL') return 3;
   let score = 6;
-  if (b) score += 4;
-  if (i?.marketStructure?.retest?.complete) score += 4;
-  if (i?.marketStructure?.liquiditySweep?.detected || i?.liquiditySweep?.detected) score += 5;
+  if (b && ((b === 'bullish' && d === 'BULLISH') || (b === 'bearish' && d === 'BEARISH'))) score += 4;
+  const retest = i?.marketStructure?.retest;
+  if (retest?.complete && retest?.level != null) score += 4;
+  const sweep = i?.marketStructure?.liquiditySweep;
+  if (sweep?.detected && sweep?.reclaimed && ((sweep.direction === 'bullish' && d === 'BULLISH') || (sweep.direction === 'bearish' && d === 'BEARISH'))) score += 5;
   return Math.min(20, score);
 }
 function scoreMomentum(i) {
@@ -76,15 +84,12 @@ function scoreVolume(i) {
   if (ratio >= 1) return 5;
   return 2;
 }
-
 function scoreTaker(d, direction) {
   const delta = number(d?.taker?.delta ?? d?.takerDelta);
-  const buy = number(d?.taker?.buyVolume);
-  const sell = number(d?.taker?.sellVolume);
+  const buy = number(d?.taker?.buyVolume), sell = number(d?.taker?.sellVolume);
   const total = buy != null && sell != null ? buy + sell : null;
   if (delta == null || total == null || total <= 0 || direction === 'NEUTRAL') return delta != null && total > 0 ? 3 : 0;
-  const signedRatio = delta / total;
-  const alignedRatio = signedRatio * directionSign(direction);
+  const alignedRatio = (delta / total) * directionSign(direction);
   if (alignedRatio >= 0.15) return 7;
   if (alignedRatio >= 0.08) return 6;
   if (alignedRatio >= 0.03) return 5;
@@ -92,43 +97,34 @@ function scoreTaker(d, direction) {
   if (alignedRatio >= -0.08) return 2;
   return 1;
 }
-
 function scoreFunding(d, direction) {
   const funding = number(d?.funding ?? d?.fundingRate);
   if (funding == null) return 0;
   const absolute = Math.abs(funding);
   if (direction === 'NEUTRAL') return absolute <= 0.001 ? 4 : 2;
-  const sign = directionSign(direction);
-  const crowdedAgainst = funding * sign > 0;
+  const crowdedAgainst = funding * directionSign(direction) > 0;
   if (absolute <= 0.0005) return 5;
   if (absolute <= 0.001) return crowdedAgainst ? 3 : 5;
   if (absolute <= 0.002) return crowdedAgainst ? 2 : 5;
   return crowdedAgainst ? 1 : 4;
 }
-
 function scoreOi(d, direction) {
   const change = number(d?.openInterest?.change1hPct ?? d?.oiChange1h);
   if (change == null) return 0;
   const magnitude = Math.abs(change);
   let score = magnitude >= 5 ? 6 : magnitude >= 3 ? 5 : magnitude >= 1.5 ? 4 : 3;
   if (direction === 'NEUTRAL') return Math.min(8, score);
-
   const takerDelta = number(d?.taker?.delta ?? d?.takerDelta);
-  const takerBuy = number(d?.taker?.buyVolume);
-  const takerSell = number(d?.taker?.sellVolume);
+  const takerBuy = number(d?.taker?.buyVolume), takerSell = number(d?.taker?.sellVolume);
   const takerTotal = takerBuy != null && takerSell != null ? takerBuy + takerSell : 0;
   const takerSign = takerDelta != null && takerTotal > 0 ? Math.sign(takerDelta) : 0;
   const aligned = takerSign !== 0 && takerSign === directionSign(direction);
   const conflicting = takerSign !== 0 && takerSign !== directionSign(direction);
-
-  // OI itself is not directional. Rising OI is only stronger confirmation when
-  // aggressive taker flow agrees with the setup; falling OI is treated as unwind.
   if (change >= 1.5 && aligned) score += 2;
   if (change >= 1.5 && conflicting) score -= 2;
   if (change <= -1.5) score = Math.max(1, score - 1);
   return Math.max(0, Math.min(8, score));
 }
-
 function scoreBtcContext(btc, setup) {
   if (!btc) return 0;
   const btcTrend = btc.trend ?? btc.bias ?? 'NEUTRAL', setupTrend = trendDirection(setup);

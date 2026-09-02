@@ -24,9 +24,16 @@ export const ERROR_TYPES = {
 const FUTURES_API_BASE_URL = 'https://fapi.binance.com';
 const FETCH_TIMEOUT_MS = 8000;
 
+const ENDPOINT_PATHS = {
+  openInterestHist: '/futures/data/openInterestHist',
+  globalLongShortAccountRatio: '/futures/data/globalLongShortAccountRatio',
+  takerlongshortRatio: '/futures/data/takerlongshortRatio',
+};
+
 function buildUrl(endpoint, params) {
   const query = new URLSearchParams(params).toString();
-  return `${FUTURES_API_BASE_URL}/fapi/v1/${endpoint}?${query}`;
+  const path = ENDPOINT_PATHS[endpoint] ?? `/fapi/v1/${endpoint}`;
+  return `${FUTURES_API_BASE_URL}${path}?${query}`;
 }
 
 function shouldTryNextUpstream(status) {

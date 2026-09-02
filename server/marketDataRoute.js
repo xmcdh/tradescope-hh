@@ -8,7 +8,16 @@ import {
 import { fetchBybitKlines, fetchBybitTicker } from './bybitProxy.js';
 
 const VALID_PROVIDERS = new Set(['binance', 'bybit']);
-const VALID_TYPES = new Set(['klines', 'ticker', 'funding', 'fundinghistory', 'openinterest']);
+const VALID_TYPES = new Set([
+  'klines',
+  'ticker',
+  'funding',
+  'fundinghistory',
+  'openinterest',
+  'openinteresthistory',
+  'longshortratio',
+  'takerlongshort',
+]);
 
 export function normalizeMarketDataQuery(query = {}) {
   return {
@@ -17,6 +26,7 @@ export function normalizeMarketDataQuery(query = {}) {
     symbol: String(query.symbol ?? '').replace(/[^A-Z0-9]/gi, '').toUpperCase(),
     interval: String(query.interval ?? '15m'),
     limit: String(query.limit ?? '100'),
+    period: String(query.period ?? query.interval ?? '15m'),
     startTime: query.startTime != null ? String(query.startTime).replace(/[^0-9]/g, '') : '',
     endTime: query.endTime != null ? String(query.endTime).replace(/[^0-9]/g, '') : '',
   };
@@ -47,7 +57,7 @@ export function validateMarketDataQuery(query) {
         endpoint: query.type || 'unknown',
         symbol: query.symbol || null,
         errorType: ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
-        message: 'Invalid type. Use klines, ticker, funding, fundingHistory, or openinterest.',
+        message: 'Invalid type.',
         upstream: null,
       }),
     };
@@ -83,6 +93,24 @@ export function validateMarketDataQuery(query) {
     };
   }
 
+  if (query.provider === 'binance' && ['longshortratio', 'takerlongshort'].includes(query.type)) {
+    const allowedPeriods = new Set(['5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d']);
+    if (!allowedPeriods.has(query.period)) {
+      return {
+        ok: false,
+        status: 400,
+        payload: buildErrorPayload({
+          source: 'binance_futures',
+          endpoint: query.type,
+          symbol: query.symbol,
+          errorType: ERROR_TYPES.UNKNOWN_UPSTREAM_ERROR,
+          message: `Invalid period ${query.period}.`,
+          upstream: null,
+        }),
+      };
+    }
+  }
+
   return { ok: true };
 }
 
@@ -101,18 +129,21 @@ function normalizeBinanceDerivativePayload(result, query) {
 
   try {
     const payload = JSON.parse(result.text);
-    const body =
-      query.type === 'funding'
-        ? {
-            symbol: payload.symbol,
-            fundingRate: payload.lastFundingRate,
-            markPrice: payload.markPrice,
-            nextFundingTime: payload.nextFundingTime,
-          }
-        : {
-            symbol: payload.symbol,
-            openInterest: payload.openInterest,
-          };
+    let body;
+
+    if (query.type === 'funding') {
+      body = {
+        symbol: payload.symbol,
+        fundingRate: payload.lastFundingRate,
+        markPrice: payload.markPrice,
+        nextFundingTime: payload.nextFundingTime,
+      };
+    } else {
+      body = {
+        symbol: payload.symbol,
+        openInterest: payload.openInterest,
+      };
+    }
 
     return {
       status: result.status,
@@ -121,18 +152,25 @@ function normalizeBinanceDerivativePayload(result, query) {
       upstream: result.upstream,
     };
   } catch (error) {
-    return jsonResult(
-      502,
-      buildErrorPayload({
-        source: 'binance_futures',
-        endpoint: query.type === 'funding' ? 'premiumIndex' : 'openInterest',
-        symbol: query.symbol,
-        errorType: ERROR_TYPES.INVALID_JSON,
-        message: error.message,
-        upstream: result.upstream,
-      }),
-    );
+    return jsonResult(502, buildErrorPayload({
+      source: 'binance_futures',
+      endpoint: query.type,
+      symbol: query.symbol,
+      errorType: ERROR_TYPES.INVALID_JSON,
+      message: error.message,
+      upstream: result.upstream,
+    }));
   }
+}
+
+function derivativeHistoryParams(query) {
+  return {
+    symbol: query.symbol,
+    period: query.period,
+    limit: String(Math.min(500, Math.max(1, Number(query.limit) || 100))),
+    ...(query.startTime ? { startTime: query.startTime } : {}),
+    ...(query.endTime ? { endTime: query.endTime } : {}),
+  };
 }
 
 export async function handleMarketDataRequest(rawQuery, fetcher = fetch) {
@@ -144,25 +182,20 @@ export async function handleMarketDataRequest(rawQuery, fetcher = fetch) {
   }
 
   if (query.provider === 'bybit') {
-    const result =
-      query.type === 'klines'
-        ? await fetchBybitKlines(query.symbol, query.interval, query.limit, fetcher)
-        : await fetchBybitTicker(query.symbol, fetcher);
+    const result = query.type === 'klines'
+      ? await fetchBybitKlines(query.symbol, query.interval, query.limit, fetcher)
+      : await fetchBybitTicker(query.symbol, fetcher);
     return jsonResult(result.status, result.payload);
   }
 
   if (query.type === 'klines') {
-    return fetchBinanceEndpoint(
-      'klines',
-      {
-        symbol: query.symbol,
-        interval: query.interval,
-        limit: query.limit,
-        ...(query.startTime ? { startTime: query.startTime } : {}),
-        ...(query.endTime ? { endTime: query.endTime } : {}),
-      },
-      fetcher,
-    );
+    return fetchBinanceEndpoint('klines', {
+      symbol: query.symbol,
+      interval: query.interval,
+      limit: query.limit,
+      ...(query.startTime ? { startTime: query.startTime } : {}),
+      ...(query.endTime ? { endTime: query.endTime } : {}),
+    }, fetcher);
   }
 
   if (query.type === 'ticker') {
@@ -170,21 +203,28 @@ export async function handleMarketDataRequest(rawQuery, fetcher = fetch) {
   }
 
   if (query.type === 'fundinghistory') {
-    return fetchBinanceEndpoint(
-      'fundingRate',
-      {
-        symbol: query.symbol,
-        limit: String(Math.min(1000, Math.max(1, Number(query.limit) || 1000))),
-        ...(query.startTime ? { startTime: query.startTime } : {}),
-        ...(query.endTime ? { endTime: query.endTime } : {}),
-      },
-      fetcher,
-    );
+    return fetchBinanceEndpoint('fundingRate', {
+      symbol: query.symbol,
+      limit: String(Math.min(1000, Math.max(1, Number(query.limit) || 1000))),
+      ...(query.startTime ? { startTime: query.startTime } : {}),
+      ...(query.endTime ? { endTime: query.endTime } : {}),
+    }, fetcher);
   }
 
-  const result =
-    query.type === 'funding'
-      ? await fetchBinanceFunding(query.symbol, fetcher)
-      : await fetchBinanceOpenInterest(query.symbol, fetcher);
+  if (query.type === 'openinteresthistory') {
+    return fetchBinanceEndpoint('openInterestHist', derivativeHistoryParams(query), fetcher);
+  }
+
+  if (query.type === 'longshortratio') {
+    return fetchBinanceEndpoint('globalLongShortAccountRatio', derivativeHistoryParams(query), fetcher);
+  }
+
+  if (query.type === 'takerlongshort') {
+    return fetchBinanceEndpoint('takerlongshortRatio', derivativeHistoryParams(query), fetcher);
+  }
+
+  const result = query.type === 'funding'
+    ? await fetchBinanceFunding(query.symbol, fetcher)
+    : await fetchBinanceOpenInterest(query.symbol, fetcher);
   return normalizeBinanceDerivativePayload(result, query);
 }

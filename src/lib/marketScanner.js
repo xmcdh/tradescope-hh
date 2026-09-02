@@ -34,7 +34,6 @@ function setupDirection(indicators) {
   if (bos === 'bearish' || structure === 'BEARISH') return 'BEARISH';
   return momentumDirection(indicators);
 }
-
 function scoreTrend(htf) {
   const direction = trendDirection(htf);
   if (direction === 'NEUTRAL') return 8;
@@ -97,12 +96,14 @@ function scoreBtcContext(btcContext, setup) {
   return 1;
 }
 function score4h({ htf, derivatives, btcContext }) {
-  return clamp(scoreTrend(htf) + scoreHtfStructure(htf) + scoreOi(derivatives) + scoreFunding(derivatives) + scoreBtcContext(btcContext, htf));
+  // Raw components total 53 points. Normalize to a true 0-100 scale.
+  return clamp((scoreTrend(htf) + scoreHtfStructure(htf) + scoreOi(derivatives) + scoreFunding(derivatives) + scoreBtcContext(btcContext, htf)) / 53 * 100);
 }
 function score15m({ htf, setup, derivatives, btcContext }) {
+  // Raw components total 65 points. Normalize to a true 0-100 scale.
   const htfTrend = trendDirection(htf), setupTrend = setupDirection(setup);
   const alignment = htfTrend === setupTrend && setupTrend !== 'NEUTRAL' ? 5 : htfTrend === 'NEUTRAL' || setupTrend === 'NEUTRAL' ? 3 : 1;
-  return clamp(scoreSetupStructure(setup) + scoreMomentum(setup) + scoreVolume(setup) + scoreOi(derivatives) + scoreTaker(derivatives) + scoreFunding(derivatives) + alignment);
+  return clamp((scoreSetupStructure(setup) + scoreMomentum(setup) + scoreVolume(setup) + scoreOi(derivatives) + scoreTaker(derivatives) + scoreFunding(derivatives) + alignment) / 65 * 100);
 }
 function qualityLabel(score) { return score >= 85 ? '强' : score >= 75 ? '可关注' : score >= 65 ? '观察' : '弱'; }
 

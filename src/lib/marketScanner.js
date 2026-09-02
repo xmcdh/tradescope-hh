@@ -2,6 +2,7 @@ import { calculateIndicators } from './indicators';
 
 const clamp = (value, min = 0, max = 100) => Math.max(min, Math.min(max, Number.isFinite(value) ? value : 0));
 const number = (value) => (Number.isFinite(Number(value)) ? Number(value) : null);
+const directionSign = (direction) => direction === 'BULLISH' ? 1 : direction === 'BEARISH' ? -1 : 0;
 
 function trendDirection(i) {
   const p = number(i?.price), e20 = number(i?.ema20), e50 = number(i?.ema50), e200 = number(i?.ema200);
@@ -75,32 +76,59 @@ function scoreVolume(i) {
   if (ratio >= 1) return 5;
   return 2;
 }
-function scoreOi(d) {
-  const change = number(d?.openInterest?.change1hPct ?? d?.oiChange1h);
-  if (change == null) return 0;
-  const magnitude = Math.abs(change);
-  if (magnitude >= 5) return 8;
-  if (magnitude >= 3) return 7;
-  if (magnitude >= 1.5) return 6;
-  return 4;
+
+function scoreTaker(d, direction) {
+  const delta = number(d?.taker?.delta ?? d?.takerDelta);
+  const buy = number(d?.taker?.buyVolume);
+  const sell = number(d?.taker?.sellVolume);
+  const total = buy != null && sell != null ? buy + sell : null;
+  if (delta == null || total == null || total <= 0 || direction === 'NEUTRAL') return delta != null && total > 0 ? 3 : 0;
+  const signedRatio = delta / total;
+  const alignedRatio = signedRatio * directionSign(direction);
+  if (alignedRatio >= 0.15) return 7;
+  if (alignedRatio >= 0.08) return 6;
+  if (alignedRatio >= 0.03) return 5;
+  if (alignedRatio >= 0) return 3;
+  if (alignedRatio >= -0.08) return 2;
+  return 1;
 }
-function scoreTaker(d) {
-  const delta = number(d?.taker?.delta ?? d?.takerDelta), buy = number(d?.taker?.buyVolume), sell = number(d?.taker?.sellVolume);
-  const ratio = delta != null && buy != null && sell != null && buy + sell > 0 ? Math.abs(delta) / (buy + sell) : null;
-  if (ratio == null) return 0;
-  if (ratio >= 0.15) return 7;
-  if (ratio >= 0.08) return 6;
-  if (ratio >= 0.03) return 5;
-  return 3;
-}
-function scoreFunding(d) {
+
+function scoreFunding(d, direction) {
   const funding = number(d?.funding ?? d?.fundingRate);
   if (funding == null) return 0;
   const absolute = Math.abs(funding);
+  if (direction === 'NEUTRAL') return absolute <= 0.001 ? 4 : 2;
+  const sign = directionSign(direction);
+  const crowdedAgainst = funding * sign > 0;
   if (absolute <= 0.0005) return 5;
-  if (absolute <= 0.001) return 4;
-  return 2;
+  if (absolute <= 0.001) return crowdedAgainst ? 3 : 5;
+  if (absolute <= 0.002) return crowdedAgainst ? 2 : 5;
+  return crowdedAgainst ? 1 : 4;
 }
+
+function scoreOi(d, direction) {
+  const change = number(d?.openInterest?.change1hPct ?? d?.oiChange1h);
+  if (change == null) return 0;
+  const magnitude = Math.abs(change);
+  let score = magnitude >= 5 ? 6 : magnitude >= 3 ? 5 : magnitude >= 1.5 ? 4 : 3;
+  if (direction === 'NEUTRAL') return Math.min(8, score);
+
+  const takerDelta = number(d?.taker?.delta ?? d?.takerDelta);
+  const takerBuy = number(d?.taker?.buyVolume);
+  const takerSell = number(d?.taker?.sellVolume);
+  const takerTotal = takerBuy != null && takerSell != null ? takerBuy + takerSell : 0;
+  const takerSign = takerDelta != null && takerTotal > 0 ? Math.sign(takerDelta) : 0;
+  const aligned = takerSign !== 0 && takerSign === directionSign(direction);
+  const conflicting = takerSign !== 0 && takerSign !== directionSign(direction);
+
+  // OI itself is not directional. Rising OI is only stronger confirmation when
+  // aggressive taker flow agrees with the setup; falling OI is treated as unwind.
+  if (change >= 1.5 && aligned) score += 2;
+  if (change >= 1.5 && conflicting) score -= 2;
+  if (change <= -1.5) score = Math.max(1, score - 1);
+  return Math.max(0, Math.min(8, score));
+}
+
 function scoreBtcContext(btc, setup) {
   if (!btc) return 0;
   const btcTrend = btc.trend ?? btc.bias ?? 'NEUTRAL', setupTrend = trendDirection(setup);
@@ -110,13 +138,14 @@ function scoreBtcContext(btc, setup) {
 }
 function score4h({ htf, derivatives, btcContext }) {
   if (!htf?.valid) return 0;
-  return clamp((scoreTrend(htf) + scoreHtfStructure(htf) + scoreOi(derivatives) + scoreFunding(derivatives) + scoreBtcContext(btcContext, htf)) / 53 * 100);
+  const direction = trendDirection(htf);
+  return clamp((scoreTrend(htf) + scoreHtfStructure(htf) + scoreOi(derivatives, direction) + scoreFunding(derivatives, direction) + scoreBtcContext(btcContext, htf)) / 53 * 100);
 }
 function score15m({ htf, setup, derivatives }) {
   if (!setup?.valid) return 0;
   const ht = trendDirection(htf), st = setupDirection(setup);
   const alignment = ht === st && st !== 'NEUTRAL' ? 5 : ht === 'NEUTRAL' || st === 'NEUTRAL' ? 3 : 1;
-  return clamp((scoreSetupStructure(setup) + scoreMomentum(setup) + scoreVolume(setup) + scoreOi(derivatives) + scoreTaker(derivatives) + scoreFunding(derivatives) + alignment) / 65 * 100);
+  return clamp((scoreSetupStructure(setup) + scoreMomentum(setup) + scoreVolume(setup) + scoreOi(derivatives, st) + scoreTaker(derivatives, st) + scoreFunding(derivatives, st) + alignment) / 65 * 100);
 }
 function qualityLabel(score, quality) {
   if (quality === 'INVALID') return '数据不足';

@@ -280,36 +280,44 @@ export function analyzeMarketStructure(candles) {
 }
 
 export function calculateIndicators(candles, timeframe = '15m') {
-  if (!Array.isArray(candles) || candles.length < 60) return null;
-  const closes = candles.map((candle) => candle.close);
-  const highs = candles.map((candle) => candle.high);
-  const lows = candles.map((candle) => candle.low);
-  const ema20Series = buildEmaLineSeries(candles, 20);
-  const ema50Series = buildEmaLineSeries(candles, 50);
-  const ema200Valid = candles.length >= 200;
-  const ema200Series = ema200Valid ? buildEmaLineSeries(candles, 200) : [];
+  if (!Array.isArray(candles) || candles.length < 61) return null;
+
+  // Binance normally returns the currently forming candle as the final item. Decision
+  // indicators must never consume that candle. Live price is injected separately by
+  // hydrateSnapshot(), so the scanner can remain responsive without making indicators
+  // fluctuate intrabar.
+  const closedCandles = candles.slice(0, -1);
+  if (closedCandles.length < 60) return null;
+
+  const closes = closedCandles.map((candle) => candle.close);
+  const highs = closedCandles.map((candle) => candle.high);
+  const lows = closedCandles.map((candle) => candle.low);
+  const ema20Series = buildEmaLineSeries(closedCandles, 20);
+  const ema50Series = buildEmaLineSeries(closedCandles, 50);
+  const ema200Valid = closedCandles.length >= 200;
+  const ema200Series = ema200Valid ? buildEmaLineSeries(closedCandles, 200) : [];
   const ema20 = tailValue(ema20Series.map((item) => item.value));
   const ema50 = tailValue(ema50Series.map((item) => item.value));
   const ema200 = ema200Valid ? tailValue(ema200Series.map((item) => item.value)) : null;
   const rsi = tailValue(RSI.calculate({ period: 14, values: closes }));
-  const atr = calculateAtr(candles, 14);
-  const marketStructure = analyzeMarketStructure(candles);
+  const atr = calculateAtr(closedCandles, 14);
+  const marketStructure = analyzeMarketStructure(closedCandles);
   const macdSeries = MACD.calculate({ values: closes, fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false });
   const macd = macdSeries.length ? macdSeries.at(-1) : null;
-  const recentWindow = candles.slice(-20);
+  const recentWindow = closedCandles.slice(-20);
   const recentVolumes = recentWindow.map((candle) => candle.volume);
   const currentVolume = recentVolumes.at(-1) ?? 0;
   const averageVolume = average(recentVolumes.slice(0, -1));
-  const supportLevels = resolveSupportResistance(candles, timeframe);
-  const lastCandle = candles.at(-1);
-  const previousCandle = candles.at(-2);
-  const price = lastCandle?.close ?? null;
+  const supportLevels = resolveSupportResistance(closedCandles, timeframe);
+  const lastCandle = closedCandles.at(-1);
+  const previousCandle = closedCandles.at(-2);
+  const closedPrice = lastCandle?.close ?? null;
   const lastCandleRange = Number.isFinite(lastCandle?.high) && Number.isFinite(lastCandle?.low) ? lastCandle.high - lastCandle.low : null;
   const timestampSource = Number.isFinite(lastCandle?.closeTime) ? lastCandle.closeTime : lastCandle?.time;
   const currentTimestamp = Number.isFinite(timestampSource) ? (timestampSource > 10_000_000_000 ? timestampSource : timestampSource * 1000) : null;
   const lastUpdate = currentTimestamp;
   const stale = Number.isFinite(lastUpdate) ? Date.now() - lastUpdate > timeframeMs(timeframe) * 2 : true;
-  const coreValid = Boolean(ema20 != null && ema50 != null && rsi != null && atr != null && macd && Number.isFinite(price));
+  const coreValid = Boolean(ema20 != null && ema50 != null && rsi != null && atr != null && macd && Number.isFinite(closedPrice));
   const dataStatus = coreValid ? { valid: true, reason: null } : { valid: false, reason: 'indicator_calculation_incomplete' };
   return {
     valid: dataStatus.valid,
@@ -319,7 +327,10 @@ export function calculateIndicators(candles, timeframe = '15m') {
     lastUpdate,
     currentTimestamp,
     timeframe,
-    price,
+    price: closedPrice,
+    closedPrice,
+    closedCandleTimestamp: currentTimestamp,
+    closedCandleCount: closedCandles.length,
     ema20,
     ema50,
     ema200,
@@ -330,7 +341,7 @@ export function calculateIndicators(candles, timeframe = '15m') {
     atr,
     marketStructure,
     macd,
-    macdSeriesTail: buildMacdHistogram(candles, 10),
+    macdSeriesTail: buildMacdHistogram(closedCandles, 10),
     volumeSpike: averageVolume > 0 ? currentVolume > averageVolume * 1.5 : false,
     currentVolume,
     averageVolume,
@@ -345,14 +356,14 @@ export function calculateIndicators(candles, timeframe = '15m') {
     supportStrength: supportLevels.supportStrength,
     resistanceStrength: supportLevels.resistanceStrength,
     htfConfluence: supportLevels.htfConfluence,
-    recentCandles: candles.slice(-20),
-    extendedCandles: candles.slice(-150),
+    recentCandles: closedCandles.slice(-20),
+    extendedCandles: closedCandles.slice(-150),
     latestHigh: highs.at(-1) ?? null,
     latestLow: lows.at(-1) ?? null,
     lastCandle,
     previousCandle,
     lastCandleRange,
-    shortPriceChange: calculateChangePercent(candles, 4),
-    change24h: calculateChangePercent(candles),
+    shortPriceChange: calculateChangePercent(closedCandles, 4),
+    change24h: calculateChangePercent(closedCandles),
   };
 }

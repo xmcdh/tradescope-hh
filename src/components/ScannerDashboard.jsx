@@ -7,9 +7,7 @@ function loadWatchlist() {
   try {
     const stored = JSON.parse(window.localStorage.getItem(WATCHLIST_STORAGE_KEY) ?? '[]');
     return [...new Set((stored.length ? stored : DEFAULT_SYMBOLS).map((item) => normalizeSymbol(String(item))).filter(Boolean))];
-  } catch {
-    return DEFAULT_SYMBOLS;
-  }
+  } catch { return DEFAULT_SYMBOLS; }
 }
 function fmt(value, digits = 2) { return Number.isFinite(Number(value)) ? Number(value).toLocaleString('en-US', { maximumFractionDigits: digits }) : '--'; }
 function trendTone(trend) { return trend === 'BULLISH' ? 'text-emerald-400' : trend === 'BEARISH' ? 'text-red-400' : 'text-zinc-400'; }
@@ -20,7 +18,8 @@ export default function ScannerDashboard() {
   const [mode, setMode] = useState('all');
   const [input, setInput] = useState('');
   const [copied, setCopied] = useState(false);
-  const { scans } = useWatchlistScanner(symbols);
+  const [refreshToken, setRefreshToken] = useState(0);
+  const { scans } = useWatchlistScanner(symbols, 'conservative', refreshToken);
   const filtered = useMemo(() => scans.filter((scan) => mode === '4h' ? scan.htf?.trend !== 'NEUTRAL' : mode === '15m' ? scan.setup?.trend !== 'NEUTRAL' : true), [mode, scans]);
   const lastDataAt = useMemo(() => { const times = scans.map((scan) => scan.updatedAt).filter(Boolean); return times.length ? new Date(Math.max(...times)).toLocaleTimeString() : '--'; }, [scans]);
 
@@ -45,6 +44,7 @@ export default function ScannerDashboard() {
             <div><div className="text-[10px] font-semibold uppercase tracking-[0.22em] text-zinc-500">BINANCE FUTURES</div><h1 className="mt-1 text-2xl font-bold tracking-tight">交易机会排行</h1><p className="mt-1 text-xs text-zinc-500">程序只负责客观数据与排序，最终交易判断交给 AI 和你。</p></div>
             <div className="flex flex-wrap gap-2">
               {[['all', '全部'], ['4h', '4H短线'], ['15m', '15M超短线']].map(([value, label]) => <button key={value} type="button" onClick={() => setMode(value)} className={`rounded-lg border px-3 py-2 text-xs font-semibold ${mode === value ? 'border-indigo-400 bg-indigo-500 text-white' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}`}>{label}</button>)}
+              <button type="button" onClick={() => setRefreshToken((value) => value + 1)} className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs font-semibold text-zinc-300">立即刷新</button>
               <button type="button" onClick={copyAll} className="rounded-lg border border-emerald-700 bg-emerald-950/40 px-3 py-2 text-xs font-semibold text-emerald-300">{copied ? '已复制' : '复制全部AI数据'}</button>
             </div>
           </div>
